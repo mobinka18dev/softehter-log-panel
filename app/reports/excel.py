@@ -69,6 +69,7 @@ def generate_excel_report(
         ("تعداد نشست‌های تکمیل‌شده" if is_fa else "Completed Sessions", summary.get("completed_sessions", 0)),
         ("تعداد نشست‌های فعال" if is_fa else "Active Sessions", summary.get("active_sessions", 0)),
         ("تعداد نشست‌های ناقص" if is_fa else "Incomplete Sessions", summary.get("incomplete_sessions", 0)),
+        ("تعداد نشست‌های تاییدنشده" if is_fa else "Unverified Sessions", summary.get("unverified_sessions", 0)),
         ("مجموع مدت زمان اتصال تایید شده" if is_fa else "Total Confirmed Duration", format_duration(summary.get("total_duration_seconds", 0), lang=lang)),
         ("میانگین مدت اتصال" if is_fa else "Average Duration", format_duration(summary.get("avg_duration_seconds", 0), lang=lang)),
         ("طولانی‌ترین نشست" if is_fa else "Longest Session", format_duration(summary.get("max_duration_seconds", 0), lang=lang)),
@@ -128,7 +129,8 @@ def generate_excel_report(
     status_labels = {
         "COMPLETED": "تکمیل‌شده" if is_fa else "Completed",
         "ACTIVE": "در حال اتصال (فعال)" if is_fa else "Active",
-        "INCOMPLETE": "ناقص / قطع ناگهانی" if is_fa else "Incomplete"
+        "INCOMPLETE": "ناقص / قطع ناگهانی" if is_fa else "Incomplete",
+        "UNVERIFIED": "نامشخص / تاییدنشده" if is_fa else "Unverified"
     }
 
     for idx, s in enumerate(sessions, 1):

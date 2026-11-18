@@ -48,7 +48,8 @@ def generate_csv_report(sessions: list[dict], lang: str = "fa") -> bytes:
     status_labels = {
         "COMPLETED": "تکمیل‌شده" if is_fa else "Completed",
         "ACTIVE": "در حال اتصال" if is_fa else "Active",
-        "INCOMPLETE": "ناقص" if is_fa else "Incomplete"
+        "INCOMPLETE": "ناقص" if is_fa else "Incomplete",
+        "UNVERIFIED": "نامشخص / تاییدنشده" if is_fa else "Unverified"
     }
 
     buffer = StringIO()

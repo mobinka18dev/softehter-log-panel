@@ -281,7 +281,10 @@ class SessionCorrelator:
                         row["id"]
                     ))
 
-        # 4. Handle Stale Active Sessions (Older than 24h with newer logs present)
+        # 4. Handle Old Sessions Without Logout (Mark as UNVERIFIED when subsequent logs exceed observation threshold)
+        # Note: A session lasting 72 hours (3 days) or more is legitimately ACTIVE during normal operation.
+        # If subsequent logs arrive from much later dates (> 7 days) without any logout or server restart event,
+        # its status cannot be confirmed from available logs and is explicitly marked UNVERIFIED (never fabricating logout time).
         if recent_events:
             valid_timestamps = [ev.timestamp for ev in recent_events if ev.timestamp]
             if valid_timestamps:
@@ -289,11 +292,11 @@ class SessionCorrelator:
                 cursor.execute("SELECT id, login_time FROM vpn_sessions WHERE status = 'ACTIVE' AND login_time IS NOT NULL")
                 for row in cursor.fetchall():
                     delta = self._calc_duration(row["login_time"], latest_ev_ts)
-                    if delta > 86400:  # Older than 24 hours
+                    if delta > (7 * 86400):  # More than 7 days without a logout event in subsequent logs
                         cursor.execute("""
                             UPDATE vpn_sessions
-                            SET status = 'INCOMPLETE',
-                                status_reason = 'Session timed out without logout event (exceeded 24h active window)',
+                            SET status = 'UNVERIFIED',
+                                status_reason = 'No logout event recorded in log stream; session status cannot be verified from available records',
                                 confidence_score = 0.5,
                                 updated_at = ?
                             WHERE id = ?
@@ -301,6 +304,20 @@ class SessionCorrelator:
                             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                             row["id"]
                         ))
+
+    def mark_unverified(self, session_id: str, reason: str = "No logout event recorded in log stream; session status cannot be verified from available records") -> None:
+        """Explicitly mark a session as UNVERIFIED without inventing logout timestamps."""
+        cursor = self.conn.cursor()
+        now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("""
+            UPDATE vpn_sessions
+            SET status = 'UNVERIFIED',
+                status_reason = ?,
+                confidence_score = 0.5,
+                updated_at = ?
+            WHERE session_id = ? AND status = 'ACTIVE'
+        """, (reason, now_ts, session_id))
+        self.conn.commit()
 
     def _calc_duration(self, start_ts: str, end_ts: str) -> int:
         """Calculate duration in seconds between two timestamps."""

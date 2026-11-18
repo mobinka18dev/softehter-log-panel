@@ -488,6 +488,10 @@ html[dir="ltr"] .table {
   background: rgba(244, 63, 94, 0.15);
   color: var(--accent-rose);
 }
+.badge-unverified {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--accent-amber);
+}
 
 /* Modals */
 .modal-overlay {

@@ -19,6 +19,7 @@ class SessionStatus(str, Enum):
     COMPLETED = "COMPLETED"
     ACTIVE = "ACTIVE"
     INCOMPLETE = "INCOMPLETE"
+    UNVERIFIED = "UNVERIFIED"
 
 
 @dataclass

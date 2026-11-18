@@ -126,18 +126,59 @@ else
     echo -e "${GREEN}[+] Existing .env file preserved.${NC}"
 fi
 
-# 8. Grant Read-Only access to SoftEther logs using POSIX ACL
+# 8. Grant Minimal Read-Only access strictly to SoftEther log directories
 source "$INSTALL_DIR/.env"
-echo -e "\n${BLUE}[6/8] Configuring Read-Only permissions for SoftEther logs...${NC}"
-if [ -d "$SOFTETHER_LOG_DIR" ]; then
-    echo -e "${GREEN}[+] Granting read-only ACL to '${APP_USER}' on '${SOFTETHER_LOG_DIR}'...${NC}"
-    setfacl -R -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR" || true
-    setfacl -R -d -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR" || true
-    echo -e "${GREEN}[+] Read-only ACL configured without modifying original file ownership.${NC}"
-else
-    echo -e "${YELLOW}[WARNING] SoftEther log directory '${SOFTETHER_LOG_DIR}' was not found.${NC}"
-    echo -e "${YELLOW}Please verify path and run: sudo setfacl -R -m u:${APP_USER}:rX <path_to_logs>${NC}"
+echo -e "\n${BLUE}[6/8] Configuring Minimal Read-Only permissions for SoftEther logs...${NC}"
+
+HAS_SERVER_LOG=false
+HAS_SECURITY_LOG=false
+
+if [ -d "$SOFTETHER_LOG_DIR/server_log" ]; then
+    HAS_SERVER_LOG=true
 fi
+if [ -d "$SOFTETHER_LOG_DIR/security_log" ]; then
+    HAS_SECURITY_LOG=true
+fi
+
+# Direct folder match (if user specified direct log folder)
+DIR_NAME=$(basename "$SOFTETHER_LOG_DIR")
+if [ "$DIR_NAME" == "server_log" ] || [ "$DIR_NAME" == "security_log" ]; then
+    HAS_SERVER_LOG=true
+fi
+
+if [ "$HAS_SERVER_LOG" = false ] && [ "$HAS_SECURITY_LOG" = false ]; then
+    echo -e "${RED}[ERROR] Neither 'server_log' nor 'security_log' was safely identified under:${NC}"
+    echo -e "${YELLOW}  ${SOFTETHER_LOG_DIR}${NC}"
+    echo -e "${RED}Security policy: Refusing to apply permissions to the entire installation root.${NC}"
+    echo -e "Please verify your SoftEther log directory and re-run installation."
+    echo -e "Expected structure: ${SOFTETHER_LOG_DIR}/server_log/ and ${SOFTETHER_LOG_DIR}/security_log/"
+    exit 1
+fi
+
+# Grant traverse-only (execute) permission on parent folder so user can reach log subdirectories
+# (Does NOT allow reading vpn_server.config or executing management binaries)
+setfacl -m "u:${APP_USER}:X" "$SOFTETHER_LOG_DIR" 2>/dev/null || true
+
+# Apply read-only ACL strictly to server_log and security_log
+if [ -d "$SOFTETHER_LOG_DIR/server_log" ]; then
+    echo -e "${GREEN}[+] Granting read-only ACL to '${APP_USER}' on '${SOFTETHER_LOG_DIR}/server_log'...${NC}"
+    setfacl -R -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR/server_log"
+    setfacl -R -d -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR/server_log"
+fi
+
+if [ -d "$SOFTETHER_LOG_DIR/security_log" ]; then
+    echo -e "${GREEN}[+] Granting read-only ACL to '${APP_USER}' on '${SOFTETHER_LOG_DIR}/security_log'...${NC}"
+    setfacl -R -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR/security_log"
+    setfacl -R -d -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR/security_log"
+fi
+
+if [ "$DIR_NAME" == "server_log" ] || [ "$DIR_NAME" == "security_log" ]; then
+    echo -e "${GREEN}[+] Granting read-only ACL to '${APP_USER}' on '${SOFTETHER_LOG_DIR}'...${NC}"
+    setfacl -R -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR"
+    setfacl -R -d -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR"
+fi
+
+echo -e "${GREEN}[+] Minimal read-only ACL configured safely. No write permissions or configuration files exposed.${NC}"
 
 # Fix ownership
 chown -R "$APP_USER":"$APP_GROUP" "$INSTALL_DIR"

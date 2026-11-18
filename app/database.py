@@ -91,7 +91,7 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
             login_time TEXT,
             logout_time TEXT,
             duration_seconds INTEGER,
-            status TEXT NOT NULL CHECK(status IN ('COMPLETED', 'ACTIVE', 'INCOMPLETE')),
+            status TEXT NOT NULL CHECK(status IN ('COMPLETED', 'ACTIVE', 'INCOMPLETE', 'UNVERIFIED')),
             status_reason TEXT,
             outgoing_bytes INTEGER DEFAULT 0,
             incoming_bytes INTEGER DEFAULT 0,

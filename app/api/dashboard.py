@@ -24,6 +24,9 @@ def get_dashboard_summary(current_user: dict = Depends(get_current_user)):
         cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'INCOMPLETE'")
         incomplete_sessions = cursor.fetchone()["cnt"]
 
+        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'UNVERIFIED'")
+        unverified_sessions = cursor.fetchone()["cnt"]
+
         cursor.execute("SELECT COALESCE(SUM(duration_seconds), 0) as s FROM vpn_sessions WHERE status = 'COMPLETED'")
         total_duration = cursor.fetchone()["s"]
 
@@ -35,10 +38,11 @@ def get_dashboard_summary(current_user: dict = Depends(get_current_user)):
 
         return {
             "total_vpn_users": total_vpn_users,
-            "total_sessions": completed_sessions + active_sessions + incomplete_sessions,
+            "total_sessions": completed_sessions + active_sessions + incomplete_sessions + unverified_sessions,
             "completed_sessions": completed_sessions,
             "active_sessions": active_sessions,
             "incomplete_sessions": incomplete_sessions,
+            "unverified_sessions": unverified_sessions,
             "total_duration_seconds": total_duration,
             "total_duration_formatted": format_duration(total_duration, lang="fa"),
             "total_events": total_events,
@@ -178,6 +182,9 @@ def get_quality_report(current_user: dict = Depends(get_current_user)):
         cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'INCOMPLETE'")
         incomplete = cursor.fetchone()["cnt"]
 
+        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'UNVERIFIED'")
+        unverified = cursor.fetchone()["cnt"]
+
         cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status_reason LIKE '%Missing login%'")
         missing_logins = cursor.fetchone()["cnt"]
 
@@ -193,6 +200,7 @@ def get_quality_report(current_user: dict = Depends(get_current_user)):
             "completed_count": completed,
             "active_count": active,
             "incomplete_count": incomplete,
+            "unverified_count": unverified,
             "missing_logins": missing_logins,
             "missing_logouts": incomplete - missing_logins - server_restarts,
             "server_restarts": server_restarts

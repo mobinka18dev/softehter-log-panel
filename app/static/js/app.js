@@ -681,7 +681,11 @@ const App = {
       } else if (s.status === "ACTIVE") {
         badgeClass = "badge-active";
         statusName = isFa ? "فعال" : "Active";
+      } else if (s.status === "UNVERIFIED") {
+        badgeClass = "badge-unverified";
+        statusName = isFa ? "نامشخص / تاییدنشده" : "Unverified";
       } else {
+        badgeClass = "badge-incomplete";
         statusName = isFa ? "ناقص" : "Incomplete";
       }
 
