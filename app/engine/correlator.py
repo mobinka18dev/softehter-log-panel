@@ -281,6 +281,27 @@ class SessionCorrelator:
                         row["id"]
                     ))
 
+        # 4. Handle Stale Active Sessions (Older than 24h with newer logs present)
+        if recent_events:
+            valid_timestamps = [ev.timestamp for ev in recent_events if ev.timestamp]
+            if valid_timestamps:
+                latest_ev_ts = max(valid_timestamps)
+                cursor.execute("SELECT id, login_time FROM vpn_sessions WHERE status = 'ACTIVE' AND login_time IS NOT NULL")
+                for row in cursor.fetchall():
+                    delta = self._calc_duration(row["login_time"], latest_ev_ts)
+                    if delta > 86400:  # Older than 24 hours
+                        cursor.execute("""
+                            UPDATE vpn_sessions
+                            SET status = 'INCOMPLETE',
+                                status_reason = 'Session timed out without logout event (exceeded 24h active window)',
+                                confidence_score = 0.5,
+                                updated_at = ?
+                            WHERE id = ?
+                        """, (
+                            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                            row["id"]
+                        ))
+
     def _calc_duration(self, start_ts: str, end_ts: str) -> int:
         """Calculate duration in seconds between two timestamps."""
         try:

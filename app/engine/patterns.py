@@ -1,7 +1,7 @@
 import re
 
-# Base timestamp regex: YYYY-MM-DD HH:MM:SS or YYYY-MM-DD HH:MM:SS.sss
-RE_TIMESTAMP = re.compile(r"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s+(.*)$")
+# Base timestamp regex: YYYY-MM-DD or YYYY/MM/DD HH:MM:SS or with .sss
+RE_TIMESTAMP = re.compile(r"^(\d{4}[-/]\d{2}[-/]\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s+(.*)$")
 
 # Virtual hub prefix in server_log: [HUB "DEFAULT"] ...
 RE_HUB_PREFIX = re.compile(r"^\[HUB\s+\"([^\"]+)\"\]\s+(.*)$", re.IGNORECASE)

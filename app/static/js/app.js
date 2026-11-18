@@ -143,6 +143,16 @@ const App = {
     return dict[key] || key;
   },
 
+  escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  },
+
   async init() {
     this.applyTheme(this.state.theme);
     this.applyLang(this.state.lang);
@@ -467,13 +477,14 @@ const App = {
       tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">داده‌ای یافت نشد</td></tr>`;
       return;
     }
+    const esc = this.escapeHtml;
     tbody.innerHTML = users.map(u => `
       <tr>
-        <td><strong>${u.username}</strong></td>
-        <td>${u.sessions_count}</td>
-        <td><span style="color:var(--accent-emerald); font-weight:600;">${u.total_duration_formatted}</span></td>
-        <td>${this.state.lang === 'fa' ? u.last_seen_jalali : u.last_seen}</td>
-        <td><code>${u.last_ip}</code></td>
+        <td><strong>${esc(u.username)}</strong></td>
+        <td>${esc(u.sessions_count)}</td>
+        <td><span style="color:var(--accent-emerald); font-weight:600;">${esc(u.total_duration_formatted)}</span></td>
+        <td>${this.state.lang === 'fa' ? esc(u.last_seen_jalali) : esc(u.last_seen)}</td>
+        <td><code>${esc(u.last_ip)}</code></td>
       </tr>
     `).join("");
   },
@@ -485,14 +496,15 @@ const App = {
       tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">داده‌ای یافت نشد</td></tr>`;
       return;
     }
+    const esc = this.escapeHtml;
     tbody.innerHTML = events.map(e => `
       <tr>
-        <td>${this.state.lang === 'fa' ? e.timestamp_jalali : e.timestamp}</td>
-        <td><span class="badge badge-active">${e.event_type}</span></td>
-        <td><strong>${e.username}</strong></td>
-        <td>${e.virtual_hub}</td>
-        <td><code>${e.client_ip}</code></td>
-        <td><small style="color:var(--text-dim);">${e.session_id}</small></td>
+        <td>${this.state.lang === 'fa' ? esc(e.timestamp_jalali) : esc(e.timestamp)}</td>
+        <td><span class="badge badge-active">${esc(e.event_type)}</span></td>
+        <td><strong>${esc(e.username)}</strong></td>
+        <td>${esc(e.virtual_hub)}</td>
+        <td><code>${esc(e.client_ip)}</code></td>
+        <td><small style="color:var(--text-dim);">${esc(e.session_id)}</small></td>
       </tr>
     `).join("");
   },
@@ -659,6 +671,7 @@ const App = {
     }
 
     const isFa = (this.state.lang === "fa");
+    const esc = this.escapeHtml;
     tbody.innerHTML = items.map(s => {
       let badgeClass = "badge-incomplete";
       let statusName = s.status;
@@ -677,14 +690,14 @@ const App = {
 
       return `
         <tr>
-          <td><strong>${s.username}</strong></td>
+          <td><strong>${esc(s.username)}</strong></td>
           <td><span class="badge ${badgeClass}">${statusName}</span></td>
-          <td>${loginStr || "-"}</td>
-          <td>${logoutStr || "-"}</td>
-          <td><strong>${s.duration_formatted}</strong></td>
-          <td><code>${s.client_ip}</code></td>
-          <td>${s.virtual_hub}</td>
-          <td><small style="color:var(--text-dim);" title="${s.status_reason || ''}">${s.session_id}</small></td>
+          <td>${esc(loginStr) || "-"}</td>
+          <td>${esc(logoutStr) || "-"}</td>
+          <td><strong>${esc(s.duration_formatted)}</strong></td>
+          <td><code>${esc(s.client_ip)}</code></td>
+          <td>${esc(s.virtual_hub)}</td>
+          <td><small style="color:var(--text-dim);" title="${esc(s.status_reason) || ''}">${esc(s.session_id)}</small></td>
         </tr>
       `;
     }).join("");
@@ -795,18 +808,19 @@ const App = {
       const tbody = document.getElementById("panel-users-tbody");
       if (!tbody) return;
 
+      const esc = this.escapeHtml;
       tbody.innerHTML = users.map(u => `
         <tr>
-          <td><strong>${u.username}</strong></td>
-          <td>${u.full_name || "-"}</td>
-          <td><span class="badge badge-active">${u.role}</span></td>
+          <td><strong>${esc(u.username)}</strong></td>
+          <td>${esc(u.full_name) || "-"}</td>
+          <td><span class="badge badge-active">${esc(u.role)}</span></td>
           <td>${u.is_active ? 'فعال' : 'غیرفعال'}</td>
-          <td>${u.created_at}</td>
-          <td>${u.last_login_at || "-"}</td>
+          <td>${esc(u.created_at)}</td>
+          <td>${esc(u.last_login_at) || "-"}</td>
           <td>
-            <button class="btn btn-secondary btn-sm" onclick="App.openResetPwd(${u.id}, '${u.username}')">رمز</button>
+            <button class="btn btn-secondary btn-sm" onclick="App.openResetPwd(${u.id}, '${esc(u.username)}')">رمز</button>
             ${u.id !== App.state.currentUser.id ? `
-              <button class="btn btn-danger btn-sm" onclick="App.deleteUser(${u.id}, '${u.username}')">حذف</button>
+              <button class="btn btn-danger btn-sm" onclick="App.deleteUser(${u.id}, '${esc(u.username)}')">حذف</button>
             ` : ''}
           </td>
         </tr>
@@ -867,13 +881,14 @@ const App = {
       const tbody = document.getElementById("audit-tbody");
       if (!tbody) return;
 
+      const esc = this.escapeHtml;
       tbody.innerHTML = data.items.map(a => `
         <tr>
-          <td>${this.state.lang === 'fa' ? a.created_at_jalali : a.created_at}</td>
-          <td><strong>${a.username}</strong></td>
-          <td><span class="badge badge-active">${a.action}</span></td>
-          <td>${a.details}</td>
-          <td><code>${a.ip_address}</code></td>
+          <td>${this.state.lang === 'fa' ? esc(a.created_at_jalali) : esc(a.created_at)}</td>
+          <td><strong>${esc(a.username)}</strong></td>
+          <td><span class="badge badge-active">${esc(a.action)}</span></td>
+          <td>${esc(a.details)}</td>
+          <td><code>${esc(a.ip_address)}</code></td>
         </tr>
       `).join("");
     } catch (e) {

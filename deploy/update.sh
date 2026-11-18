@@ -41,7 +41,7 @@ echo -e "${BLUE}[3/5] Updating Python packages...${NC}"
 
 # 4. Apply database schema upgrades
 echo -e "${BLUE}[4/5] Updating database schema...${NC}"
-sudo -u "$APP_USER" "$INSTALL_DIR/.venv/bin/python" -c "from app.database import init_db; init_db()"
+sudo -u "$APP_USER" PYTHONPATH="$INSTALL_DIR" "$INSTALL_DIR/.venv/bin/python" -c "import sys; sys.path.insert(0, '$INSTALL_DIR'); from app.database import init_db; init_db()"
 
 # 5. Restart service and verify health
 echo -e "${BLUE}[5/5] Restarting service...${NC}"

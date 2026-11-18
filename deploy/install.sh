@@ -46,7 +46,7 @@ fi
 # 3. Install necessary prerequisites
 echo -e "\n${BLUE}[1/8] Checking and installing dependencies...${NC}"
 apt-get update -y
-apt-get install -y python3 python3-venv python3-pip acl curl
+apt-get install -y python3 python3-venv python3-pip acl curl sqlite3
 
 # 4. Create non-root application user
 echo -e "\n${BLUE}[2/8] Creating dedicated system user '${APP_USER}'...${NC}"
@@ -144,7 +144,7 @@ chown -R "$APP_USER":"$APP_GROUP" "$INSTALL_DIR"
 
 # 9. Initialize Database
 echo -e "\n${BLUE}[7/8] Initializing database...${NC}"
-sudo -u "$APP_USER" "$INSTALL_DIR/.venv/bin/python" -c "from app.database import init_db; init_db()"
+sudo -u "$APP_USER" PYTHONPATH="$INSTALL_DIR" "$INSTALL_DIR/.venv/bin/python" -c "import sys; sys.path.insert(0, '$INSTALL_DIR'); from app.database import init_db; init_db()"
 
 # 10. Install systemd service & logrotate
 echo -e "\n${BLUE}[8/8] Installing and starting systemd service...${NC}"
