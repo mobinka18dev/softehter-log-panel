@@ -1,0 +1,3 @@
+2026-11-15 14:00:00.100 The connection "CID-201" (Client IP address: 198.51.100.50, Port: 60123) is attempting to connect to the Virtual Hub. The auth type provided is "Password authentication" and the user name is "synth_charlie".
+2026-11-15 14:00:00.200 Connection "CID-201": Successfully authenticated as user "synth_charlie".
+2026-11-15 14:00:00.250 Connection "CID-201": The new session "SID-SYNTH_CHARLIE-1" has been created. (IP address: 198.51.100.50, Port: 60123)

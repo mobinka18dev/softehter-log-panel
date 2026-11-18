@@ -1,0 +1,22 @@
+[Unit]
+Description=SoftEther VPN Log Panel
+After=network.target
+
+[Service]
+Type=simple
+User=softether-panel
+Group=softether-panel
+WorkingDirectory=/opt/softether-log-panel
+EnvironmentFile=/opt/softether-log-panel/.env
+ExecStart=/opt/softether-log-panel/.venv/bin/python manage.py run
+Restart=always
+RestartSec=5s
+
+# Security hardening
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

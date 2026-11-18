@@ -1,0 +1,29 @@
+2026-11-15 08:00:00.000 The SoftEther VPN Server service has started.
+2026-11-15 08:10:00.100 On the TCP Listener (Port 443), a Client (IP address 198.51.100.10, Host name "client-1.example", Port 54321) has connected.
+2026-11-15 08:10:00.102 For the client 198.51.100.10:54321, connection "CID-101" has been created.
+2026-11-15 08:10:00.250 [HUB "DEFAULT"] The connection "CID-101" (Client IP address: 198.51.100.10, Port: 54321) is attempting to connect to the Virtual Hub. The auth type provided is "Password authentication" and the user name is "synth_alice".
+2026-11-15 08:10:00.300 [HUB "DEFAULT"] Connection "CID-101": Successfully authenticated as user "synth_alice".
+2026-11-15 08:10:00.350 [HUB "DEFAULT"] Connection "CID-101": The new session "SID-SYNTH_ALICE-1" has been created. (IP address: 198.51.100.10, Port: 54321, Physical underlying protocol: "Standard TCP/IP (IPv4)")
+2026-11-15 09:30:00.800 [HUB "DEFAULT"] Session "SID-SYNTH_ALICE-1": The session has been terminated. The statistical information is as follows: Total outgoing data size: 10485760 bytes, Total incoming data size: 20971520 bytes.
+2026-11-15 09:30:00.810 Connection "CID-101" has been terminated.
+
+2026-11-15 10:00:00.100 On the TCP Listener (Port 443), a Client (IP address 203.0.113.25, Host name "client-2.example", Port 51234) has connected.
+2026-11-15 10:00:00.102 For the client 203.0.113.25:51234, connection "CID-102" has been created.
+2026-11-15 10:00:00.250 [HUB "DEFAULT"] The connection "CID-102" (Client IP address: 203.0.113.25, Port: 51234) is attempting to connect to the Virtual Hub. The auth type provided is "Password authentication" and the user name is "synth_bob".
+2026-11-15 10:00:00.300 [HUB "DEFAULT"] Connection "CID-102": Successfully authenticated as user "synth_bob".
+2026-11-15 10:00:00.350 [HUB "DEFAULT"] Connection "CID-102": The new session "SID-SYNTH_BOB-1" has been created. (IP address: 203.0.113.25, Port: 51234, Physical underlying protocol: "Standard TCP/IP (IPv4)")
+
+2026-11-15 10:05:00.100 On the TCP Listener (Port 443), a Client (IP address 192.0.2.77, Host name "client-3.example", Port 59876) has connected.
+2026-11-15 10:05:00.102 For the client 192.0.2.77:59876, connection "CID-103" has been created.
+2026-11-15 10:05:00.250 [HUB "DEFAULT"] The connection "CID-103" (Client IP address: 192.0.2.77, Port: 59876) is attempting to connect to the Virtual Hub. The auth type provided is "Password authentication" and the user name is "synth_bob".
+2026-11-15 10:05:00.300 [HUB "DEFAULT"] Connection "CID-103": Successfully authenticated as user "synth_bob".
+2026-11-15 10:05:00.350 [HUB "DEFAULT"] Connection "CID-103": The new session "SID-SYNTH_BOB-2" has been created. (IP address: 192.0.2.77, Port: 59876, Physical underlying protocol: "Standard TCP/IP (IPv4)")
+
+2026-11-15 11:00:00.500 [HUB "DEFAULT"] Session "SID-SYNTH_BOB-1": The session has been terminated. The statistical information is as follows: Total outgoing data size: 5242880 bytes, Total incoming data size: 10485760 bytes.
+2026-11-15 11:30:00.500 [HUB "DEFAULT"] Session "SID-SYNTH_BOB-2": The session has been terminated. The statistical information is as follows: Total outgoing data size: 2097152 bytes, Total incoming data size: 4194304 bytes.
+
+2026-11-15 14:00:00.100 [HUB "OFFICE"] The connection "CID-201" (Client IP address: 198.51.100.50, Port: 60123) is attempting to connect to the Virtual Hub. The auth type provided is "Password authentication" and the user name is "synth_charlie".
+2026-11-15 14:00:00.200 [HUB "OFFICE"] Connection "CID-201": Successfully authenticated as user "synth_charlie".
+2026-11-15 14:00:00.250 [HUB "OFFICE"] Connection "CID-201": The new session "SID-SYNTH_CHARLIE-1" has been created. (IP address: 198.51.100.50, Port: 60123)
+
+2026-11-15 15:00:00.000 The SoftEther VPN Server service has started.
