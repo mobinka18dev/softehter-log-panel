@@ -6,6 +6,10 @@
 
 set -euo pipefail
 
+# Ensure non-interactive execution for apt and needrestart
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=l
+
 # ANSI color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -19,6 +23,8 @@ APP_GROUP="softether-panel"
 SERVICE_NAME="softether-panel"
 LOG_DIR="/var/log/softether-panel"
 DEFAULT_PORT=8080
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo -e "${BLUE}================================================================${NC}"
 echo -e "${BLUE}        SoftEther VPN Log Panel - Ubuntu Installer              ${NC}"
@@ -45,8 +51,8 @@ fi
 
 # 3. Install necessary prerequisites
 echo -e "\n${BLUE}[1/8] Checking and installing dependencies...${NC}"
-apt-get update -y
-apt-get install -y python3 python3-venv python3-pip acl curl sqlite3
+apt-get update -y -q
+apt-get install -y -q python3 python3-venv python3-pip acl curl sqlite3
 
 # 4. Create non-root application user
 echo -e "\n${BLUE}[2/8] Creating dedicated system user '${APP_USER}'...${NC}"
@@ -57,19 +63,13 @@ else
     echo -e "${GREEN}[+] User '${APP_USER}' created.${NC}"
 fi
 
-# 5. Setup directories
+# 5. Setup directories and copy project files
 echo -e "\n${BLUE}[3/8] Setting up application directories...${NC}"
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data"
 mkdir -p "$INSTALL_DIR/backups"
 mkdir -p "$LOG_DIR"
 
-chown -R "$APP_USER":"$APP_GROUP" "$INSTALL_DIR"
-chown -R "$APP_USER":"$APP_GROUP" "$LOG_DIR"
-chmod 750 "$INSTALL_DIR"
-
-# Copy project files if installing from git clone directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ "$SCRIPT_DIR" != "$INSTALL_DIR" ]; then
     echo -e "${GREEN}[+] Copying files from $SCRIPT_DIR to $INSTALL_DIR...${NC}"
     cp -r "$SCRIPT_DIR/app" "$INSTALL_DIR/"
@@ -81,6 +81,8 @@ if [ "$SCRIPT_DIR" != "$INSTALL_DIR" ]; then
         cp "$SCRIPT_DIR/.env.example" "$INSTALL_DIR/"
     fi
 fi
+
+cd "$INSTALL_DIR"
 
 # 6. Python virtualenv
 echo -e "\n${BLUE}[4/8] Creating Python virtual environment...${NC}"
@@ -148,7 +150,6 @@ if [ -d "$SOFTETHER_LOG_DIR/security_log" ]; then
     HAS_SECURITY_LOG=true
 fi
 
-# Direct folder match (if user specified direct log folder)
 DIR_NAME=$(basename "$SOFTETHER_LOG_DIR")
 if [ "$DIR_NAME" == "server_log" ] || [ "$DIR_NAME" == "security_log" ]; then
     HAS_SERVER_LOG=true
@@ -163,17 +164,25 @@ if [ "$HAS_SERVER_LOG" = false ] && [ "$HAS_SECURITY_LOG" = false ]; then
     exit 1
 fi
 
-# Grant traverse-only (execute) permission on all parent folders up to root
-# This allows entering the directory tree to reach log subdirectories without granting
-# read access to sensitive files like /root or vpn_server.config
-CUR_DIR="$SOFTETHER_LOG_DIR"
-while [ "$CUR_DIR" != "/" ] && [ "$CUR_DIR" != "." ]; do
-    echo -e "${GREEN}[+] Applying traverse-only ACL (X) on parent: ${CUR_DIR}...${NC}"
-    setfacl -m "u:${APP_USER}:X" "$CUR_DIR" 2>/dev/null || true
-    CUR_DIR="$(dirname "$CUR_DIR")"
+# Grant traverse-only (execute) permission on all parent folders up to root (e.g. /root)
+PARENT_DIR="$(dirname "$SOFTETHER_LOG_DIR")"
+while [ "$PARENT_DIR" != "/" ] && [ "$PARENT_DIR" != "." ]; do
+    echo -e "${GREEN}[+] Applying traverse-only ACL (X) on parent: ${PARENT_DIR}...${NC}"
+    setfacl -m "u:${APP_USER}:X" "$PARENT_DIR" 2>/dev/null || true
+    PARENT_DIR="$(dirname "$PARENT_DIR")"
 done
 
-# Apply read-only ACL strictly to server_log and security_log
+# Grant non-recursive read & execute ACL on SOFTETHER_LOG_DIR itself (e.g. /root/vpnserver)
+echo -e "${GREEN}[+] Applying non-recursive read & execute ACL (rX) on: ${SOFTETHER_LOG_DIR}...${NC}"
+setfacl -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR" 2>/dev/null || true
+
+# Explicitly block access to sensitive configuration files
+if [ -f "$SOFTETHER_LOG_DIR/vpn_server.config" ]; then
+    echo -e "${GREEN}[+] Explicitly blocking read access to sensitive file: vpn_server.config...${NC}"
+    setfacl -m "u:${APP_USER}:---" "$SOFTETHER_LOG_DIR/vpn_server.config" 2>/dev/null || true
+fi
+
+# Apply recursive read-only + directory default ACL strictly to server_log and security_log
 if [ -d "$SOFTETHER_LOG_DIR/server_log" ]; then
     echo -e "${GREEN}[+] Granting read-only ACL to '${APP_USER}' on '${SOFTETHER_LOG_DIR}/server_log'...${NC}"
     setfacl -R -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR/server_log"
@@ -194,12 +203,18 @@ fi
 
 echo -e "${GREEN}[+] Minimal read-only ACL configured safely. No write permissions or configuration files exposed.${NC}"
 
-# Fix ownership
+# Fix ownership and permissions before database initialization
 chown -R "$APP_USER":"$APP_GROUP" "$INSTALL_DIR"
+chown -R "$APP_USER":"$APP_GROUP" "$LOG_DIR"
+chmod 750 "$INSTALL_DIR"
+if [ -f "$INSTALL_DIR/.env" ]; then
+    chown "$APP_USER":"$APP_GROUP" "$INSTALL_DIR/.env"
+    chmod 600 "$INSTALL_DIR/.env"
+fi
 
 # 9. Initialize Database
 echo -e "\n${BLUE}[7/8] Initializing database...${NC}"
-sudo -u "$APP_USER" PYTHONPATH="$INSTALL_DIR" "$INSTALL_DIR/.venv/bin/python" -c "import sys; sys.path.insert(0, '$INSTALL_DIR'); from app.database import init_db; init_db()"
+(cd "$INSTALL_DIR" && sudo -u "$APP_USER" PYTHONPATH="$INSTALL_DIR" "$INSTALL_DIR/.venv/bin/python" -c "import sys; sys.path.insert(0, '$INSTALL_DIR'); from app.database import init_db; init_db()")
 
 # 10. Install systemd service & logrotate
 echo -e "\n${BLUE}[8/8] Installing and starting systemd service...${NC}"
@@ -212,7 +227,7 @@ systemctl restart "$SERVICE_NAME"
 
 # Wait for startup and check health
 sleep 3
-if curl -s "http://127.0.0.1:${PORT:-8080}/health" | grep -q "ok"; then
+if curl -s "http://127.0.0.1:${PORT:-8080}/health" | grep -q "ok" || curl -s "http://127.0.0.1:${PORT:-8080}/api/health" | grep -q "ok"; then
     echo -e "\n${GREEN}================================================================${NC}"
     echo -e "${GREEN}  Installation completed successfully!                          ${NC}"
     echo -e "${GREEN}================================================================${NC}"

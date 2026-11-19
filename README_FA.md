@@ -101,27 +101,35 @@ sudo setfacl -R -d -m u:softether-panel:rX /usr/local/vpnserver/security_log
 
 ## ۶. مراحل نصب روی سرور اوبونتو
 
-هدف سرور با آی‌پی `192.168.5.6`:
+هدف سرور اوبونتو ۲۲.۰۴ / ۲۴.۰۴ (با آی‌پی `192.168.5.6`):
 
-1. اتصال از طریق کنسول سرور یا شبکه داخلی.
-2. دریافت پروژه از گیت‌هاب:
+1. اجرای دستور یک‌خطی نصب مستقیم در ترمینال سرور:
    ```bash
-   git clone https://github.com/mobinka18dev/softehter-log-panel.git
-   cd softehter-log-panel
-   ```
-3. اجرای اسکریپت نصب خودکار:
-   ```bash
+   git clone https://github.com/mobinka18dev/softehter-log-panel.git /opt/softether-log-panel
+   cd /opt/softether-log-panel
    sudo bash deploy/install.sh
    ```
-   اسکریپت به صورت خودکار:
-   - نسخه اوبونتو را چک می‌کند.
-   - کاربر غیر روت `softether-panel` را می‌سازد.
-   - پوشه `/opt/softether-log-panel` را ایجاد و فایل‌ها را مستقر می‌سازد.
-   - محیط مجازی پایتون (`.venv`) را ساخته و وابستگی‌ها را نصب می‌کند.
-   - کلید امنیتی ۶۴ بایتی تصادفی ایجاد می‌کند.
-   - مسیر لاگ‌ها را سوال کرده و دسترسی خواندنی ACL تنظیم می‌کند.
-   - دیتابیس را اینیشیالایز می‌کند.
-   - سرویس `softether-panel.service` را فعال و راه‌اندازی می‌کند.
+   اسکریپت به صورت کاملاً خودکار و بدون نیاز به مداخله دستی:
+   - نسخه سیستم‌عامل اوبونتو را بررسی می‌کند.
+   - کاربر سیستمی ایزوله `softether-panel` را ایجاد می‌کند.
+   - وابستگی‌های سیستمی و محیط مجازی پایتون (`.venv`) را پیکربندی می‌کند.
+   - کلید امنیتی ۶۴ بایتی تصادفی ایجاد می‌نماید.
+   - مجوزهای امنیتی فقط-خواندنی (POSIX ACL) را با ایزولاسیون کامل دایرکتوری `/root` و فایل `vpn_server.config` تنظیم می‌کند.
+   - دیتابیس SQLite WAL را راه‌اندازی می‌کند.
+   - سرویس `systemd` با نام `softether-panel.service` را فعال و روشن می‌کند.
+
+### تست‌های بررسی صحت و امنیت پس از نصب:
+```bash
+# ۱. اطمینان از مسدود بودن دسترسی به فایل‌های روت و کانفیگ سرور SoftEther (باید خروجی Permission denied بدهد):
+sudo -u softether-panel ls -la /root
+sudo -u softether-panel cat /root/vpnserver/vpn_server.config
+
+# ۲. اطمینان از دسترسی فقط-خواندنی به لاگ‌های سرور (باید لیست لاگ‌ها را نمایش دهد):
+sudo -u softether-panel ls -la /root/vpnserver/server_log
+
+# ۳. بررسی وضعیت سلامت و آماده‌به‌کار بودن وب‌سرویس:
+curl -s http://127.0.0.1:8080/api/health
+```
 
 ---
 
@@ -137,8 +145,8 @@ PORT=8080
 SECRET_KEY=یک_رشته_تصادفی_بسیار_امن
 ACCESS_TOKEN_EXPIRE_MINUTES=480
 DATABASE_PATH=/opt/softether-log-panel/data/panel.db
-SOFTETHER_LOG_DIR=/usr/local/vpnserver
-SYNC_INTERVAL_SECONDS=300
+SOFTETHER_LOG_DIR=/root/vpnserver
+SYNC_INTERVAL_SECONDS=15
 AUTO_SYNC_ENABLED=true
 MAX_LOG_LINE_BATCH=5000
 ```
@@ -218,7 +226,14 @@ sudo -u softether-panel /opt/softether-log-panel/.venv/bin/python /opt/softether
 
 ## ۱۳. بروزرسانی نرم‌افزار
 
-برای بروزرسانی پنل، دستور زیر را اجرا کنید:
+برای بروزرسانی سریع پنل:
+```bash
+cd /opt/softether-log-panel
+sudo git pull origin main
+sudo systemctl restart softether-panel
+```
+
+یا برای اجرای اسکریپت بروزرسانی خودکار همراه با تهیه نسخه پشتیبان پیش از آپدیت:
 ```bash
 sudo bash /opt/softether-log-panel/deploy/update.sh
 ```

@@ -30,9 +30,13 @@ def admin_headers():
 
 
 def test_health_check(client):
-    res = client.get("/health")
-    assert res.status_code == 200
-    assert res.json()["status"] == "ok"
+    res1 = client.get("/health")
+    assert res1.status_code == 200
+    assert res1.json()["status"] == "ok"
+
+    res2 = client.get("/api/health")
+    assert res2.status_code == 200
+    assert res2.json()["status"] == "ok"
 
 
 def test_initial_setup_and_login(client):

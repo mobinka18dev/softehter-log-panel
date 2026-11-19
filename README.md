@@ -77,26 +77,56 @@ SoftEther VPN Server
 
 ---
 
-## Production Deployment on Ubuntu (192.168.5.6)
+## Quick Install on Ubuntu (One-Click)
 
-1. **Clone to Ubuntu server:**
-   ```bash
-   git clone https://github.com/mobinka18dev/softehter-log-panel.git
-   cd softehter-log-panel
-   ```
+Run the following command directly on your Ubuntu 22.04 / 24.04 server (e.g. `192.168.5.6`):
 
-2. **Run the production installer:**
-   ```bash
-   sudo bash deploy/install.sh
-   ```
+```bash
+git clone https://github.com/mobinka18dev/softehter-log-panel.git /opt/softether-log-panel
+cd /opt/softether-log-panel
+sudo bash deploy/install.sh
+```
 
-3. **Create the initial Super Administrator:**
-   ```bash
-   sudo -u softether-panel /opt/softether-log-panel/.venv/bin/python /opt/softether-log-panel/manage.py create-admin
-   ```
+### Post-Install Security & Health Checks
 
-4. **Access the panel:**
-   Open `http://192.168.5.6:8080` in your web browser.
+Verify that security ACL boundaries and service status are correctly enforced:
+
+```bash
+# 1. Verify strict ACL block on /root and vpn_server.config (must return Permission Denied):
+sudo -u softether-panel ls -la /root
+sudo -u softether-panel cat /root/vpnserver/vpn_server.config
+
+# 2. Verify read-only access to SoftEther log files (must list log files successfully):
+sudo -u softether-panel ls -la /root/vpnserver/server_log
+
+# 3. Verify service healthcheck:
+curl -s http://127.0.0.1:8080/api/health
+```
+
+### Create Initial Super Administrator
+
+```bash
+sudo -u softether-panel /opt/softether-log-panel/.venv/bin/python /opt/softether-log-panel/manage.py create-admin
+```
+Then access the web interface at `http://192.168.5.6:8080` (or `http://127.0.0.1:8080`).
+
+---
+
+## Quick Update
+
+To pull the latest updates and restart the service on Ubuntu:
+
+```bash
+cd /opt/softether-log-panel
+sudo git pull origin main
+sudo systemctl restart softether-panel
+```
+Or run the full automated update script with pre-update backup:
+```bash
+sudo bash /opt/softether-log-panel/deploy/update.sh
+```
+
+---
 
 ---
 

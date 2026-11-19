@@ -133,6 +133,7 @@ async def serve_index():
 
 
 @app.get("/health")
+@app.get("/api/health")
 def health_check():
     """Health check endpoint for systemd and monitoring."""
     return {"status": "ok", "app": settings.APP_NAME, "version": "1.0.0"}

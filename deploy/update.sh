@@ -5,6 +5,9 @@
 
 set -euo pipefail
 
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=l
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -49,7 +52,7 @@ systemctl restart "$SERVICE_NAME"
 sleep 3
 
 source "$INSTALL_DIR/.env"
-if curl -s "http://127.0.0.1:${PORT:-8080}/health" | grep -q "ok"; then
+if curl -s "http://127.0.0.1:${PORT:-8080}/health" | grep -q "ok" || curl -s "http://127.0.0.1:${PORT:-8080}/api/health" | grep -q "ok"; then
     echo -e "${GREEN}[+] Update completed and verified successfully!${NC}"
 else
     echo -e "${RED}[WARNING] Service restarted, but health check failed.${NC}"
