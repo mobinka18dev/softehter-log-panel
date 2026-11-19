@@ -99,7 +99,7 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
             source_logs TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            UNIQUE(virtual_hub, session_id)
+            UNIQUE(virtual_hub, session_id, login_time)
         );
     """)
 

@@ -18,19 +18,32 @@ logger = logging.getLogger("uvicorn.error")
 
 async def periodic_log_sync():
     """Background task to sync logs periodically every 15 seconds."""
+    logger.info(f"[AutoSync] Background log sync loop started (interval: {settings.SYNC_INTERVAL_SECONDS}s).")
     while True:
         try:
             await asyncio.sleep(settings.SYNC_INTERVAL_SECONDS)
             if settings.AUTO_SYNC_ENABLED:
                 with get_db() as conn:
                     sync_engine = LogSynchronizer(conn)
-                    stats = sync_engine.sync()
-                    if stats.get("events_imported", 0) > 0:
-                        logger.info(f"[AutoSync] Imported {stats['events_imported']} events from {stats['files_updated']} files.")
+                    # 1. Ingest new raw events from all log files
+                    sync_stats = sync_engine.sync_all()
+                    # 2. Correlate sessions
+                    corr_stats = sync_engine.correlate()
+
+                    if sync_stats.get("errors"):
+                        logger.warning(f"[AutoSync] Errors/warnings during sync: {sync_stats['errors']}")
+
+                    if sync_stats.get("events_imported", 0) > 0 or corr_stats.get("sessions_updated", 0) > 0:
+                        logger.info(
+                            f"[AutoSync] Imported {sync_stats.get('events_imported', 0)} events from "
+                            f"{sync_stats.get('files_updated', 0)} files. Sessions updated: "
+                            f"{corr_stats.get('sessions_updated', 0)} (Active now: {corr_stats.get('active_sessions', 0)})."
+                        )
         except asyncio.CancelledError:
+            logger.info("[AutoSync] Background log sync loop cancelled.")
             break
         except Exception as e:
-            logger.error(f"[AutoSync] Error during background log sync: {e}", exc_info=True)
+            logger.error(f"[AutoSync] Error during background log sync tick: {e}", exc_info=True)
             await asyncio.sleep(5)
 
 

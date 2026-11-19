@@ -177,19 +177,19 @@ done
 if [ -d "$SOFTETHER_LOG_DIR/server_log" ]; then
     echo -e "${GREEN}[+] Granting read-only ACL to '${APP_USER}' on '${SOFTETHER_LOG_DIR}/server_log'...${NC}"
     setfacl -R -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR/server_log"
-    setfacl -R -d -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR/server_log"
+    find "$SOFTETHER_LOG_DIR/server_log" -type d -exec setfacl -d -m "u:${APP_USER}:rX" {} +
 fi
 
 if [ -d "$SOFTETHER_LOG_DIR/security_log" ]; then
-    echo -e "${GREEN}[+] Granting read-only ACL to '${APP_USER}' on '${SOFTETHER_LOG_DIR}/security_log'...${NC}"
+    echo -e "${GREEN}[+] Granting read-only ACL to '${APP_USER}' on '${SOFTETHER_LOG_DIR}/security_log' (including Hub subdirectories)...${NC}"
     setfacl -R -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR/security_log"
-    setfacl -R -d -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR/security_log"
+    find "$SOFTETHER_LOG_DIR/security_log" -type d -exec setfacl -d -m "u:${APP_USER}:rX" {} +
 fi
 
 if [ "$DIR_NAME" == "server_log" ] || [ "$DIR_NAME" == "security_log" ]; then
     echo -e "${GREEN}[+] Granting read-only ACL to '${APP_USER}' on '${SOFTETHER_LOG_DIR}'...${NC}"
     setfacl -R -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR"
-    setfacl -R -d -m "u:${APP_USER}:rX" "$SOFTETHER_LOG_DIR"
+    find "$SOFTETHER_LOG_DIR" -type d -exec setfacl -d -m "u:${APP_USER}:rX" {} +
 fi
 
 echo -e "${GREEN}[+] Minimal read-only ACL configured safely. No write permissions or configuration files exposed.${NC}"

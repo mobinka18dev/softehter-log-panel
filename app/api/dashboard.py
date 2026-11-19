@@ -222,7 +222,7 @@ def get_active_sessions(current_user: dict = Depends(get_current_user)):
             ORDER BY login_time DESC
         """)
         rows = cursor.fetchall()
-        now_utc = datetime.now(timezone.utc)
+        now_local = datetime.now()
         result = []
         for r in rows:
             duration_sec = 0
@@ -230,8 +230,8 @@ def get_active_sessions(current_user: dict = Depends(get_current_user)):
             if login_time_str:
                 try:
                     clean_lt = login_time_str.split(".")[0]
-                    lt = datetime.strptime(clean_lt, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-                    diff = (now_utc - lt).total_seconds()
+                    lt = datetime.strptime(clean_lt, "%Y-%m-%d %H:%M:%S")
+                    diff = (now_local - lt).total_seconds()
                     duration_sec = max(0, int(diff))
                 except Exception:
                     pass

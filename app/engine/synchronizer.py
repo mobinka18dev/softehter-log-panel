@@ -47,7 +47,19 @@ class LogSynchronizer:
 
     def sync(self) -> dict:
         """
-        Run incremental synchronization over all discovered log files.
+        Run complete synchronization: ingest new log events from all discovered files
+        and correlate all stateful VPN sessions.
+        """
+        sync_stats = self.sync_all()
+        corr_stats = self.correlate()
+        sync_stats["sessions_updated"] = corr_stats.get("sessions_updated", 0)
+        sync_stats["active_sessions"] = corr_stats.get("active_sessions", 0)
+        return sync_stats
+
+    def sync_all(self) -> dict:
+        """
+        Ingest and synchronize raw log events incrementally from all discovered log files.
+        Loops until EOF on every file so today's log tail is always reached immediately.
         """
         files = self.discover_log_files()
         stats = {
@@ -96,24 +108,24 @@ class LogSynchronizer:
                     line_no = state["last_line_number"]
                     prev_events = state["events_count"]
 
-            # Process file incrementally
+            # Process file incrementally using binary mode for exact byte offset tracking
             hub_name = extract_hub_from_path(file_path)
             events_batch: list[RawLogEvent] = []
             new_offset = offset
             current_line = line_no
+            file_imported = 0
 
             try:
-                # Open read-only with fallback encoding
-                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                with open(file_path, "rb") as f:
                     f.seek(offset)
                     while True:
                         tell_before = f.tell()
-                        line = f.readline()
-                        if not line:
+                        raw_bytes = f.readline()
+                        if not raw_bytes:
                             break
 
                         # Check if line was completely written
-                        if not line.endswith("\n"):
+                        if not raw_bytes.endswith(b"\n"):
                             # Incomplete trailing line, step back and pause here
                             f.seek(tell_before)
                             break
@@ -121,6 +133,11 @@ class LogSynchronizer:
                         current_line += 1
                         new_offset = f.tell()
 
+                        # Fast-skip noisy SecureNAT lines at byte level BEFORE parsing or batch counting
+                        if b"SecureNAT:" in raw_bytes or b"SID-SECURENAT-" in raw_bytes:
+                            continue
+
+                        line = raw_bytes.decode("utf-8", errors="replace")
                         event = parse_line(
                             raw_line=line,
                             source_file=file_path.name,
@@ -133,11 +150,13 @@ class LogSynchronizer:
                         if len(events_batch) >= settings.MAX_LOG_LINE_BATCH:
                             imported = self.correlator.process_events(events_batch)
                             stats["events_imported"] += imported
+                            file_imported += imported
                             events_batch.clear()
 
                     if events_batch:
                         imported = self.correlator.process_events(events_batch)
                         stats["events_imported"] += imported
+                        file_imported += imported
                         events_batch.clear()
 
                 stats["files_updated"] += 1
@@ -158,7 +177,7 @@ class LogSynchronizer:
                         events_count = events_count + ?
                 """, (
                     file_key, file_inode, mtime, new_offset, current_line, now_str,
-                    stats["events_imported"], stats["events_imported"]
+                    file_imported, file_imported
                 ))
                 self.conn.commit()
 
@@ -174,10 +193,17 @@ class LogSynchronizer:
                         inode = excluded.inode,
                         status = excluded.status,
                         last_synced_at = excluded.last_synced_at
-                """, (file_key, file_inode, mtime, offset, line_no, now_str, f"ERROR: {e}", prev_events))
+                    """, (file_key, file_inode, mtime, offset, line_no, now_str, f"ERROR: {e}", prev_events))
                 self.conn.commit()
 
         return stats
+
+    def correlate(self) -> dict:
+        """
+        Run the session correlator across all database sessions and events.
+        Reconciles active sessions, matches completions, and returns metrics.
+        """
+        return self.correlator.correlate_all()
 
     def run_diagnostics(self) -> dict:
         """

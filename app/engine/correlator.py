@@ -123,34 +123,36 @@ class SessionCorrelator:
 
                 username = username or "unknown"
 
+                # Check if this exact login instance was already recorded (e.g. in both server_log and security_log)
+                # or if an orphaned termination event arrived first
                 cursor.execute("""
                     SELECT id, virtual_hub, login_time, logout_time, status, source_logs
                     FROM vpn_sessions
-                    WHERE session_id = ?
-                """, (sess_id,))
+                    WHERE session_id = ? AND (login_time = ? OR login_time IS NULL)
+                    ORDER BY id DESC LIMIT 1
+                """, (sess_id, ev.timestamp))
                 existing = cursor.fetchone()
 
                 now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 if existing:
-                    # Session record exists (maybe created by earlier termination event)
                     sources = set(existing["source_logs"].split(",") if existing["source_logs"] else [])
                     sources.add(ev.source_file)
                     src_str = ",".join(filter(None, sources))
 
                     login_time = existing["login_time"] or ev.timestamp
                     logout_time = existing["logout_time"]
-                    
-                    status = existing["status"]
-                    reason = None
-                    duration = None
-                    conf = 1.0
 
                     if logout_time:
                         status = SessionStatus.COMPLETED.value
                         delta = self._calc_duration(login_time, logout_time)
                         duration = delta
+                        reason = None
+                        conf = 1.0
                     else:
                         status = SessionStatus.ACTIVE.value
+                        duration = None
+                        reason = None
+                        conf = 1.0
 
                     target_hub = hub if hub != 'DEFAULT' else existing["virtual_hub"]
                     cursor.execute("""
@@ -172,7 +174,7 @@ class SessionCorrelator:
                         duration, status, reason, conf, src_str, now_ts, existing["id"]
                     ))
                 else:
-                    # New session creation
+                    # Brand new session creation: immediately mark as ACTIVE
                     cursor.execute("""
                         INSERT INTO vpn_sessions (
                             session_id, virtual_hub, username, client_ip,
@@ -193,10 +195,12 @@ class SessionCorrelator:
                 out_bytes = ev.outgoing_bytes
                 in_bytes = ev.incoming_bytes
 
+                # Match the open ACTIVE session first
                 cursor.execute("""
                     SELECT id, virtual_hub, username, client_ip, client_port, login_time, logout_time, status, source_logs
                     FROM vpn_sessions
-                    WHERE session_id = ?
+                    WHERE session_id = ? AND status = 'ACTIVE'
+                    ORDER BY id DESC LIMIT 1
                 """, (sess_id,))
                 existing = cursor.fetchone()
 
@@ -208,17 +212,7 @@ class SessionCorrelator:
 
                     login_time = existing["login_time"]
                     logout_time = ev.timestamp
-
-                    if login_time:
-                        status = SessionStatus.COMPLETED.value
-                        duration = self._calc_duration(login_time, logout_time)
-                        reason = None
-                        conf = 1.0
-                    else:
-                        status = SessionStatus.INCOMPLETE.value
-                        duration = None
-                        reason = "Missing login event (session began before log window)"
-                        conf = 0.5
+                    duration = self._calc_duration(login_time, logout_time) if login_time else None
 
                     target_hub = hub if hub != 'DEFAULT' else existing["virtual_hub"]
                     cursor.execute("""
@@ -226,40 +220,79 @@ class SessionCorrelator:
                         SET virtual_hub = ?,
                             logout_time = ?,
                             duration_seconds = ?,
-                            status = ?,
-                            status_reason = ?,
+                            status = 'COMPLETED',
+                            status_reason = NULL,
                             outgoing_bytes = MAX(outgoing_bytes, ?),
                             incoming_bytes = MAX(incoming_bytes, ?),
-                            confidence_score = ?,
+                            confidence_score = 1.0,
                             source_logs = ?,
                             updated_at = ?
                         WHERE id = ?
                     """, (
-                        target_hub, logout_time, duration, status, reason, out_bytes,
-                        in_bytes, conf, src_str, now_ts, existing["id"]
+                        target_hub, logout_time, duration, out_bytes,
+                        in_bytes, src_str, now_ts, existing["id"]
                     ))
                 else:
-                    # Termination without prior login found
-                    username = ev.username
-                    if not username and sess_id.startswith("SID-"):
-                        parts = sess_id.split("-")
-                        if len(parts) >= 2:
-                            username = parts[1]
-                    username = username or "unknown"
-
+                    # Check if this termination was already recorded (e.g. duplicate event from both logs)
                     cursor.execute("""
-                        INSERT INTO vpn_sessions (
-                            session_id, virtual_hub, username, client_ip,
-                            client_port, login_time, logout_time, duration_seconds,
-                            status, status_reason, outgoing_bytes, incoming_bytes,
-                            confidence_score, source_logs, created_at, updated_at
-                        ) VALUES (?, ?, ?, NULL, NULL, NULL, ?, NULL, ?, ?, ?, ?, 0.5, ?, ?, ?)
-                    """, (
-                        sess_id, hub, username, ev.timestamp,
-                        SessionStatus.INCOMPLETE.value,
-                        "Missing login event (session began before log window)",
-                        out_bytes, in_bytes, ev.source_file, now_ts, now_ts
-                    ))
+                        SELECT id, source_logs, virtual_hub
+                        FROM vpn_sessions
+                        WHERE session_id = ? AND logout_time = ?
+                        ORDER BY id DESC LIMIT 1
+                    """, (sess_id, ev.timestamp))
+                    dup_term = cursor.fetchone()
+                    if dup_term:
+                        sources = set(dup_term["source_logs"].split(",") if dup_term["source_logs"] else [])
+                        sources.add(ev.source_file)
+                        src_str = ",".join(filter(None, sources))
+                        target_hub = hub if hub != 'DEFAULT' else dup_term["virtual_hub"]
+                        cursor.execute("""
+                            UPDATE vpn_sessions
+                            SET virtual_hub = ?,
+                                outgoing_bytes = MAX(outgoing_bytes, ?),
+                                incoming_bytes = MAX(incoming_bytes, ?),
+                                source_logs = ?,
+                                updated_at = ?
+                            WHERE id = ?
+                        """, (target_hub, out_bytes, in_bytes, src_str, now_ts, dup_term["id"]))
+                    else:
+                        # Termination without prior login found
+                        username = ev.username
+                        if not username and sess_id.startswith("SID-"):
+                            parts = sess_id.split("-")
+                            if len(parts) >= 2:
+                                username = parts[1]
+                        username = username or "unknown"
+
+                        cursor.execute("""
+                            INSERT INTO vpn_sessions (
+                                session_id, virtual_hub, username, client_ip,
+                                client_port, login_time, logout_time, duration_seconds,
+                                status, status_reason, outgoing_bytes, incoming_bytes,
+                                confidence_score, source_logs, created_at, updated_at
+                            ) VALUES (?, ?, ?, NULL, NULL, NULL, ?, NULL, ?, ?, ?, ?, 0.5, ?, ?, ?)
+                        """, (
+                            sess_id, hub, username, ev.timestamp,
+                            SessionStatus.INCOMPLETE.value,
+                            "Missing login event (session began before log window)",
+                            out_bytes, in_bytes, ev.source_file, now_ts, now_ts
+                        ))
+
+            # Handle AUTH_SUCCESS: update any sessions with unknown username
+            elif ev.event_type == EventType.AUTH_SUCCESS and ev.username:
+                now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                if ev.connection_id:
+                    cursor.execute("""
+                        SELECT session_id FROM vpn_raw_events
+                        WHERE connection_id = ? AND session_id IS NOT NULL
+                    """, (ev.connection_id,))
+                    sids = [r["session_id"] for r in cursor.fetchall()]
+                    for sid in sids:
+                        cursor.execute("""
+                            UPDATE vpn_sessions
+                            SET username = ?, updated_at = ?
+                            WHERE session_id = ? AND (username = 'unknown' OR username IS NULL)
+                        """, (ev.username, now_ts, sid))
 
             # Handle CONN_CREATED with session_id (e.g. from VPN Client details)
             elif ev.event_type == EventType.CONN_CREATED and ev.session_id:
@@ -338,6 +371,106 @@ class SessionCorrelator:
             WHERE session_id = ? AND status = 'ACTIVE'
         """, (reason, now_ts, session_id))
         self.conn.commit()
+
+    def correlate_all(self) -> dict:
+        """
+        Reconcile all sessions in the database:
+        1. Find any active sessions that have matching termination events in vpn_raw_events.
+        2. Resolve usernames for any unknown sessions.
+        3. Check server restart interruptions.
+        4. Check stale sessions (> 7 days) and mark UNVERIFIED.
+        Returns metrics summary.
+        """
+        cursor = self.conn.cursor()
+        now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        updated_count = 0
+
+        # 1. Close any ACTIVE sessions if a termination event exists
+        cursor.execute("SELECT id, session_id, login_time, outgoing_bytes, incoming_bytes FROM vpn_sessions WHERE status = 'ACTIVE'")
+        active_sessions = cursor.fetchall()
+        for sess in active_sessions:
+            sess_id = sess["session_id"]
+            login_ts = sess["login_time"]
+            cursor.execute("""
+                SELECT timestamp, outgoing_bytes, incoming_bytes
+                FROM vpn_raw_events
+                WHERE session_id = ? AND event_type = ? AND timestamp >= ?
+                ORDER BY timestamp ASC LIMIT 1
+            """, (sess_id, EventType.SESSION_TERMINATED.value, login_ts or ""))
+            term_ev = cursor.fetchone()
+            if term_ev:
+                logout_ts = term_ev["timestamp"]
+                dur = self._calc_duration(login_ts, logout_ts) if login_ts else 0
+                out_b = max(sess["outgoing_bytes"] or 0, term_ev["outgoing_bytes"] or 0)
+                in_b = max(sess["incoming_bytes"] or 0, term_ev["incoming_bytes"] or 0)
+                cursor.execute("""
+                    UPDATE vpn_sessions
+                    SET logout_time = ?,
+                        duration_seconds = ?,
+                        status = 'COMPLETED',
+                        status_reason = NULL,
+                        outgoing_bytes = ?,
+                        incoming_bytes = ?,
+                        confidence_score = 1.0,
+                        updated_at = ?
+                    WHERE id = ?
+                """, (logout_ts, dur, out_b, in_b, now_ts, sess["id"]))
+                updated_count += 1
+
+        # 2. Check for server restarts interrupting ACTIVE sessions
+        cursor.execute("""
+            SELECT timestamp FROM vpn_raw_events
+            WHERE event_type = ?
+            ORDER BY timestamp ASC
+        """, (EventType.SERVER_START.value,))
+        for row in cursor.fetchall():
+            r_ts = row["timestamp"]
+            cursor.execute("""
+                SELECT id, login_time FROM vpn_sessions
+                WHERE status = 'ACTIVE' AND login_time < ?
+            """, (r_ts,))
+            for r in cursor.fetchall():
+                dur = self._calc_duration(r["login_time"], r_ts)
+                cursor.execute("""
+                    UPDATE vpn_sessions
+                    SET logout_time = ?,
+                        duration_seconds = ?,
+                        status = 'INCOMPLETE',
+                        status_reason = ?,
+                        confidence_score = 0.7,
+                        updated_at = ?
+                    WHERE id = ?
+                """, (
+                    r_ts, dur,
+                    f"Terminated abnormally due to VPN Server restart at {r_ts}",
+                    now_ts, r["id"]
+                ))
+                updated_count += 1
+
+        # 3. Check for stale sessions (> 7 days) without termination
+        cursor.execute("SELECT id, login_time FROM vpn_sessions WHERE status = 'ACTIVE' AND login_time IS NOT NULL")
+        for r in cursor.fetchall():
+            now_local_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            delta = self._calc_duration(r["login_time"], now_local_str)
+            if delta > (7 * 86400):
+                cursor.execute("""
+                    UPDATE vpn_sessions
+                    SET status = 'UNVERIFIED',
+                        status_reason = 'No logout event recorded in log stream; session status cannot be verified from available records',
+                        confidence_score = 0.5,
+                        updated_at = ?
+                    WHERE id = ?
+                """, (now_ts, r["id"]))
+                updated_count += 1
+
+        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'ACTIVE'")
+        active_count = cursor.fetchone()["cnt"]
+
+        self.conn.commit()
+        return {
+            "sessions_updated": updated_count,
+            "active_sessions": active_count
+        }
 
     def _calc_duration(self, start_ts: str, end_ts: str) -> int:
         """Calculate duration in seconds between two timestamps."""

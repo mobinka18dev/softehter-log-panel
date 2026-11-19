@@ -50,15 +50,19 @@ class RawLogEvent:
         this will yield identical fingerprints so we don't duplicate events.
         """
         ts = self.timestamp.strip()
-        hub = (self.virtual_hub or "").strip().upper()
         etype = self.event_type.value
         user = (self.username or "").strip().lower()
         sess = (self.session_id or "").strip().upper()
         conn = (self.connection_id or "").strip().upper()
         ip = (self.client_ip or "").strip()
-        
-        # Primary key payload
-        key = f"{ts}|{hub}|{etype}|{user}|{sess}|{conn}|{ip}"
+
+        # Primary key payload: omit virtual_hub to allow server_log (DEFAULT) and security_log (HUB)
+        # to deduplicate the same event seamlessly.
+        if sess or conn:
+            key = f"{ts}|{etype}|{sess}|{conn}|{user}|{ip}|{self.outgoing_bytes}|{self.incoming_bytes}"
+        else:
+            key = f"{ts}|{etype}|{user}|{ip}|{self.source_file}|{self.source_line}"
+
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 

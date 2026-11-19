@@ -94,3 +94,74 @@ def test_inode_and_truncation_handling(sync_env):
     bob_sess = cursor.fetchone()
     assert bob_sess is not None
     assert bob_sess["username"] == "BOB"
+
+
+def test_e2e_massive_securenats_and_incremental_rapid_logins(sync_env):
+    """
+    End-to-end regression test:
+    1. Initial sync of a log file containing 4 logins + 10,000 noisy SecureNAT lines.
+    2. Assert initial sync imports the 4 logins without getting stuck on SecureNAT lines.
+    3. Append 4 more rapid login/logout cycles + 1 currently open login to the SAME file.
+    4. Run incremental sync + correlate.
+    5. Assert that total logins = 9 in vpn_sessions and exactly 1 session is currently ACTIVE.
+    """
+    conn, log_dir, srv_dir, sec_dir = sync_env
+    sync_engine = LogSynchronizer(conn, log_dir=log_dir)
+
+    log_file = sec_dir / "sec_20261119.log"
+
+    # Part 1: Initial 4 logins + 10,000 SecureNAT lines
+    initial_lines = []
+    for i in range(1, 5):
+        initial_lines.append(f'2026-11-19 12:00:{i*10:02d}.100 [HUB "DEFAULT"] Connection "CID-{i}": The new session "SID-USER-{i}" has been created. (IP address: 192.168.1.10{i}, Port number: 5000{i})\r\n')
+        initial_lines.append(f'2026-11-19 12:00:{i*10+5:02d}.500 [HUB "DEFAULT"] Session "SID-USER-{i}": The session has been terminated. The statistical information is as follows: Total outgoing data size: 1000 bytes, Total incoming data size: 2000 bytes.\r\n')
+
+    # Add 10,000 noisy SecureNAT lines
+    for i in range(10000):
+        initial_lines.append(f'2026-11-19 12:01:00.{i%1000:03d} [HUB "DEFAULT"] SecureNAT: Kernel IP routing table test line {i}\r\n')
+
+    with open(log_file, "wb") as f:
+        f.writelines([l.encode("utf-8") for l in initial_lines])
+
+    stats1 = sync_engine.sync()
+    assert stats1["events_imported"] == 8  # 4 creates + 4 terminates
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions")
+    assert cursor.fetchone()["cnt"] == 4
+
+    cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'COMPLETED'")
+    assert cursor.fetchone()["cnt"] == 4
+
+    # Part 2: Append 4 more rapid login/logout cycles + 1 currently open login to the SAME file
+    append_lines = []
+    for i in range(5, 9):
+        append_lines.append(f'2026-11-19 12:05:{i*10:02d}.100 [HUB "DEFAULT"] Connection "CID-{i}": The new session "SID-USER-{i}" has been created. (IP address: 192.168.1.10{i}, Port number: 5000{i})\r\n')
+        append_lines.append(f'2026-11-19 12:05:{i*10+5:02d}.500 [HUB "DEFAULT"] Session "SID-USER-{i}": The session has been terminated. The statistical information is as follows: Total outgoing data size: 1500 bytes, Total incoming data size: 2500 bytes.\r\n')
+
+    # 9th login is currently open / ACTIVE
+    append_lines.append('2026-11-19 12:06:00.100 [HUB "DEFAULT"] Connection "CID-9": The new session "SID-USER-9" has been created. (IP address: 192.168.1.109, Port number: 50009)\r\n')
+
+    with open(log_file, "ab") as f:
+        f.writelines([l.encode("utf-8") for l in append_lines])
+
+    # Run incremental sync_all() and correlate()
+    sync_stats = sync_engine.sync_all()
+    assert sync_stats["events_imported"] == 9  # 4 creates + 4 terminates + 1 create
+    corr_stats = sync_engine.correlate()
+
+    # Total logins must be 9
+    cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions")
+    assert cursor.fetchone()["cnt"] == 9
+
+    # Completed must be 8
+    cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'COMPLETED'")
+    assert cursor.fetchone()["cnt"] == 8
+
+    # Exactly 1 currently open session
+    cursor.execute("SELECT session_id, username, status FROM vpn_sessions WHERE status = 'ACTIVE'")
+    active_rows = cursor.fetchall()
+    assert len(active_rows) == 1
+    assert active_rows[0]["session_id"] == "SID-USER-9"
+    assert active_rows[0]["status"] == "ACTIVE"
+    assert active_rows[0]["username"] == "USER"
