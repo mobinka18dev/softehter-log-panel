@@ -108,6 +108,7 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS sync_state (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             file_path TEXT UNIQUE NOT NULL,
+            inode INTEGER DEFAULT 0,
             last_modified REAL NOT NULL,
             last_byte_offset INTEGER NOT NULL,
             last_line_number INTEGER NOT NULL,
@@ -116,6 +117,12 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
             events_count INTEGER DEFAULT 0
         );
     """)
+
+    # Safe migration: ensure inode column exists if table was created in an earlier phase
+    cursor.execute("PRAGMA table_info(sync_state);")
+    existing_cols = [col["name"] if isinstance(col, sqlite3.Row) else col[1] for col in cursor.fetchall()]
+    if existing_cols and "inode" not in existing_cols:
+        cursor.execute("ALTER TABLE sync_state ADD COLUMN inode INTEGER DEFAULT 0;")
 
     # Indexes for fast querying
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_vpn_sessions_username ON vpn_sessions (username);")

@@ -30,6 +30,10 @@ def parse_line(
     if not line:
         return None
 
+    # Fast-ignore noisy internal SecureNAT sessions early before regex matching
+    if "SecureNAT:" in line or 'Session "SID-SECURENAT-' in line or "SID-SECURENAT-" in line:
+        return None
+
     # 1. Match timestamp
     ts_match = patterns.RE_TIMESTAMP.match(line)
     if not ts_match:
@@ -63,6 +67,38 @@ def parse_line(
             timestamp=timestamp,
             virtual_hub="SERVER",
             event_type=EventType.SERVER_STOP,
+            raw_text=raw_line
+        )
+
+    # 4. Check VPN Client details
+    cd_match = patterns.RE_CLIENT_DETAILS.search(message)
+    if cd_match:
+        session_id = cd_match.group(1)
+        details_body = cd_match.group(2)
+        ip_m = patterns.RE_CD_IP.search(details_body)
+        port_m = patterns.RE_CD_PORT.search(details_body)
+        hub_m = patterns.RE_CD_HUB.search(details_body)
+
+        client_ip = ip_m.group(1) if ip_m and ip_m.group(1) != "0.0.0.0" else None
+        client_port = int(port_m.group(1)) if port_m else None
+        if hub_m and hub_m.group(1):
+            virtual_hub = hub_m.group(1).upper()
+
+        username = None
+        sid_match = patterns.RE_SID_USERNAME.match(session_id)
+        if sid_match:
+            username = sid_match.group(1)
+
+        return RawLogEvent(
+            source_file=source_file,
+            source_line=line_no,
+            timestamp=timestamp,
+            virtual_hub=virtual_hub,
+            event_type=EventType.CONN_CREATED,
+            session_id=session_id,
+            username=username,
+            client_ip=client_ip,
+            client_port=client_port,
             raw_text=raw_line
         )
 

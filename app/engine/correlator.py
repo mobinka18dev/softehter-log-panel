@@ -71,7 +71,7 @@ class SessionCorrelator:
         if cids_to_query:
             placeholders = ",".join(["?"] * len(cids_to_query))
             cursor.execute(f"""
-                SELECT connection_id, username, client_ip, client_port, virtual_hub
+                SELECT connection_id, username, client_ip, client_port, virtual_hub, event_type
                 FROM vpn_raw_events
                 WHERE connection_id IN ({placeholders})
                 ORDER BY id ASC
@@ -80,7 +80,7 @@ class SessionCorrelator:
                 cid = row["connection_id"]
                 if cid not in cid_map:
                     cid_map[cid] = {}
-                if row["username"]:
+                if row["username"] and (row["event_type"] == EventType.AUTH_SUCCESS.value or not cid_map[cid].get("username")):
                     cid_map[cid]["username"] = row["username"]
                 if row["client_ip"]:
                     cid_map[cid]["client_ip"] = row["client_ip"]
@@ -105,14 +105,17 @@ class SessionCorrelator:
                 client_ip = ev.client_ip
                 client_port = ev.client_port
 
-                # Enforce CID lookup if missing IP or username
+                # Enforce CID lookup for authenticated username, IP, port
                 if ev.connection_id and ev.connection_id in cid_map:
                     info = cid_map[ev.connection_id]
-                    username = username or info.get("username")
+                    if info.get("username"):
+                        username = info["username"]
+                    else:
+                        username = username or info.get("username")
                     client_ip = client_ip or info.get("client_ip")
                     client_port = client_port or info.get("client_port")
 
-                # Fallback username from session ID: SID-ALICE-1 -> alice
+                # Fallback username from session ID: SID-ALICE-1 -> ALICE
                 if not username and sess_id.startswith("SID-"):
                     parts = sess_id.split("-")
                     if len(parts) >= 2:
@@ -253,6 +256,19 @@ class SessionCorrelator:
                         "Missing login event (session began before log window)",
                         out_bytes, in_bytes, ev.source_file, now_ts, now_ts
                     ))
+
+            # Handle CONN_CREATED with session_id (e.g. from VPN Client details)
+            elif ev.event_type == EventType.CONN_CREATED and ev.session_id:
+                hub = ev.virtual_hub
+                sess_id = ev.session_id
+                now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute("""
+                    UPDATE vpn_sessions
+                    SET client_ip = COALESCE(?, client_ip),
+                        client_port = COALESCE(?, client_port),
+                        updated_at = ?
+                    WHERE virtual_hub = ? AND session_id = ?
+                """, (ev.client_ip, ev.client_port, now_ts, hub, sess_id))
 
         # 3. Handle Server Restart Interruption
         if server_restarts:

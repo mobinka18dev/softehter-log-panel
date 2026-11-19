@@ -95,10 +95,17 @@ echo -e "\n${BLUE}[5/8] Configuring application environment...${NC}"
 if [ ! -f "$INSTALL_DIR/.env" ]; then
     RANDOM_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
     
-    # Prompt for SoftEther Log directory
-    DEFAULT_SE_LOG="/usr/local/vpnserver"
-    if [ -d "/var/log/vpnserver" ]; then
-        DEFAULT_SE_LOG="/var/log/vpnserver"
+    # Prompt for SoftEther Log directory with auto-detection
+    DEFAULT_SE_LOG="/root/vpnserver"
+    if [ ! -d "/root/vpnserver" ]; then
+        if [ -d "/usr/local/vpnserver" ]; then
+            DEFAULT_SE_LOG="/usr/local/vpnserver"
+        elif [ -d "/var/log/vpnserver" ]; then
+            DEFAULT_SE_LOG="/var/log/vpnserver"
+        fi
+    fi
+    if [ -n "${SOFTETHER_LOG_DIR:-}" ]; then
+        DEFAULT_SE_LOG="${SOFTETHER_LOG_DIR}"
     fi
 
     echo -e "${YELLOW}Enter the path to your SoftEther VPN Server logs directory [Default: ${DEFAULT_SE_LOG}]:${NC}"
@@ -118,6 +125,7 @@ SOFTETHER_LOG_DIR=${SE_LOG_PATH}
 SYNC_INTERVAL_SECONDS=300
 AUTO_SYNC_ENABLED=true
 MAX_LOG_LINE_BATCH=5000
+CORS_ORIGINS="http://127.0.0.1:${DEFAULT_PORT},http://localhost:${DEFAULT_PORT},http://192.168.5.6:${DEFAULT_PORT}"
 EOF
     chown "$APP_USER":"$APP_GROUP" "$INSTALL_DIR/.env"
     chmod 600 "$INSTALL_DIR/.env"
@@ -155,9 +163,15 @@ if [ "$HAS_SERVER_LOG" = false ] && [ "$HAS_SECURITY_LOG" = false ]; then
     exit 1
 fi
 
-# Grant traverse-only (execute) permission on parent folder so user can reach log subdirectories
-# (Does NOT allow reading vpn_server.config or executing management binaries)
-setfacl -m "u:${APP_USER}:X" "$SOFTETHER_LOG_DIR" 2>/dev/null || true
+# Grant traverse-only (execute) permission on all parent folders up to root
+# This allows entering the directory tree to reach log subdirectories without granting
+# read access to sensitive files like /root or vpn_server.config
+CUR_DIR="$SOFTETHER_LOG_DIR"
+while [ "$CUR_DIR" != "/" ] && [ "$CUR_DIR" != "." ]; do
+    echo -e "${GREEN}[+] Applying traverse-only ACL (X) on parent: ${CUR_DIR}...${NC}"
+    setfacl -m "u:${APP_USER}:X" "$CUR_DIR" 2>/dev/null || true
+    CUR_DIR="$(dirname "$CUR_DIR")"
+done
 
 # Apply read-only ACL strictly to server_log and security_log
 if [ -d "$SOFTETHER_LOG_DIR/server_log" ]; then

@@ -29,7 +29,7 @@ const App = {
       welcome: "خوش آمدید",
       totalVpnUsers: "کل کاربران VPN",
       totalSessions: "کل نشست‌ها",
-      activeSessions: "نشست‌های فعال",
+      activeSessions: "نشست‌های باز در لاگ",
       incompleteSessions: "نشست‌های ناقص",
       totalDuration: "مجموع زمان اتصال",
       qualityRating: "دقت تطبیق نشست‌ها",
@@ -89,7 +89,7 @@ const App = {
       welcome: "Welcome",
       totalVpnUsers: "Total VPN Users",
       totalSessions: "Total Sessions",
-      activeSessions: "Active Sessions",
+      activeSessions: "Open Sessions (In Log)",
       incompleteSessions: "Incomplete Sessions",
       totalDuration: "Total Connection Time",
       qualityRating: "Parser Accuracy",
@@ -675,12 +675,17 @@ const App = {
     tbody.innerHTML = items.map(s => {
       let badgeClass = "badge-incomplete";
       let statusName = s.status;
+      let statusTitle = s.status_reason || "";
+
       if (s.status === "COMPLETED") {
         badgeClass = "badge-completed";
         statusName = isFa ? "تکمیل‌شده" : "Completed";
       } else if (s.status === "ACTIVE") {
         badgeClass = "badge-active";
-        statusName = isFa ? "فعال" : "Active";
+        statusName = isFa ? "در حال اتصال (لاگ)" : "Active (In Log)";
+        statusTitle = isFa 
+          ? "نشست در جریان لاگ‌ها باز است و رویداد قطعی ثبت نشده است (استخراج غیرمستقیم از لاگ، نه سوکت زنده vpncmd)"
+          : "Session opened in log stream with no disconnect event recorded yet (log-derived, not a live vpncmd socket check)";
       } else if (s.status === "UNVERIFIED") {
         badgeClass = "badge-unverified";
         statusName = isFa ? "نامشخص / تاییدنشده" : "Unverified";
@@ -695,7 +700,7 @@ const App = {
       return `
         <tr>
           <td><strong>${esc(s.username)}</strong></td>
-          <td><span class="badge ${badgeClass}">${statusName}</span></td>
+          <td><span class="badge ${badgeClass}" title="${esc(statusTitle)}">${statusName}</span></td>
           <td>${esc(loginStr) || "-"}</td>
           <td>${esc(logoutStr) || "-"}</td>
           <td><strong>${esc(s.duration_formatted)}</strong></td>

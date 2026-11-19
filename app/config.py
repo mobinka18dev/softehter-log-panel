@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     MAX_LOGIN_ATTEMPTS: int = 5
     LOGIN_RATE_LIMIT_WINDOW_MINUTES: int = 15
 
+    # CORS Configuration
+    CORS_ORIGINS: str = Field(
+        default="http://127.0.0.1:8080,http://localhost:8080,http://192.168.5.6:8080",
+        description="Comma-separated allowed origins for CORS"
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -56,13 +56,25 @@ RE_AUTH_FAIL_2 = re.compile(
 
 # Session created
 RE_SESSION_CREATED_1 = re.compile(
-    r"(?:Connection\s+\"CID-(\d+)\":\s*)?The new session\s+\"([^\"]+)\"\s+has been created(?:\.\s*\((?:IP address|Client IP):\s*([0-9a-fA-F\.:]+)(?:,\s*Port:\s*(\d+))?.*?\))?",
+    r"(?:Connection\s+\"CID-(\d+)\":\s*)?The new session\s+\"([^\"]+)\"\s+has been created(?:\.\s*\((?:IP address|Client IP):\s*([0-9a-fA-F\.:]+)(?:,\s*Port(?:\s+number)?:\s*(\d+))?.*?\))?",
     re.IGNORECASE
 )
 RE_SESSION_CREATED_2 = re.compile(
     r"(?:The\s+)?session\s+\"([^\"]+)\"\s+has been created",
     re.IGNORECASE
 )
+
+# VPN Client details line
+RE_CLIENT_DETAILS = re.compile(
+    r"Session\s+\"([^\"]+)\":\s*VPN Client details:\s*\((.*)\)",
+    re.IGNORECASE
+)
+RE_CD_IP = re.compile(r"Client IP address:\s*\"([0-9a-fA-F\.:]+)\"", re.IGNORECASE)
+RE_CD_PORT = re.compile(r"Client port number:\s*(\d+)", re.IGNORECASE)
+RE_CD_HUB = re.compile(r"Virtual Hub name:\s*\"([^\"]*)\"", re.IGNORECASE)
+RE_CD_PRODUCT = re.compile(r"Client product name:\s*\"([^\"]*)\"", re.IGNORECASE)
+RE_CD_OS = re.compile(r"Client OS name:\s*\"([^\"]*)\"", re.IGNORECASE)
+RE_CD_VERSION = re.compile(r"Client version:\s*(\d+)", re.IGNORECASE)
 
 # Session terminated
 RE_SESSION_TERMINATED = re.compile(
@@ -81,4 +93,4 @@ RE_CONN_TERMINATED_2 = re.compile(
 )
 
 # Extract username from SID if username is in SID format (SoftEther default: SID-USERNAME-ID or SID-USERNAME-[...]-ID)
-RE_SID_USERNAME = re.compile(r"^SID-([A-Za-z0-9_\-\.]+?)(?:-\[[^\]]+\])?-(\d+)$", re.IGNORECASE)
+RE_SID_USERNAME = re.compile(r"^SID-([A-Za-z0-9_\.]+?)(?:-\[[^\]]+\])?-(\d+)$", re.IGNORECASE)

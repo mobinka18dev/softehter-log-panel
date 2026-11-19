@@ -58,13 +58,14 @@ class LogSynchronizer:
                 st = file_path.stat()
                 file_size = st.st_size
                 mtime = st.st_mtime
+                file_inode = getattr(st, "st_ino", 0)
             except OSError as e:
                 stats["errors"].append(f"Cannot stat {file_path.name}: {e}")
                 continue
 
             # Query existing sync state
             cursor.execute("""
-                SELECT last_modified, last_byte_offset, last_line_number, events_count
+                SELECT inode, last_modified, last_byte_offset, last_line_number, events_count
                 FROM sync_state
                 WHERE file_path = ?
             """, (file_key,))
@@ -75,13 +76,14 @@ class LogSynchronizer:
             prev_events = 0
 
             if state:
-                if file_size == state["last_byte_offset"]:
-                    # No new content
-                    continue
-                elif file_size < state["last_byte_offset"]:
-                    # File was truncated/rotated; reset to start
+                stored_inode = state["inode"] if "inode" in state.keys() else 0
+                # Inode changed (file replaced / rotated) or file truncated:
+                if (stored_inode and file_inode and stored_inode != file_inode) or (file_size < state["last_byte_offset"]):
                     offset = 0
                     line_no = 0
+                elif file_size == state["last_byte_offset"]:
+                    # No new content
+                    continue
                 else:
                     offset = state["last_byte_offset"]
                     line_no = state["last_line_number"]
@@ -136,10 +138,11 @@ class LogSynchronizer:
 
                 cursor.execute("""
                     INSERT INTO sync_state (
-                        file_path, last_modified, last_byte_offset,
+                        file_path, inode, last_modified, last_byte_offset,
                         last_line_number, last_synced_at, status, events_count
-                    ) VALUES (?, ?, ?, ?, ?, 'OK', ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'OK', ?)
                     ON CONFLICT(file_path) DO UPDATE SET
+                        inode = excluded.inode,
                         last_modified = excluded.last_modified,
                         last_byte_offset = excluded.last_byte_offset,
                         last_line_number = excluded.last_line_number,
@@ -147,7 +150,7 @@ class LogSynchronizer:
                         status = 'OK',
                         events_count = events_count + ?
                 """, (
-                    file_key, mtime, new_offset, current_line, now_str,
+                    file_key, file_inode, mtime, new_offset, current_line, now_str,
                     stats["events_imported"], stats["events_imported"]
                 ))
                 self.conn.commit()
@@ -157,13 +160,14 @@ class LogSynchronizer:
                 now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 cursor.execute("""
                     INSERT INTO sync_state (
-                        file_path, last_modified, last_byte_offset,
+                        file_path, inode, last_modified, last_byte_offset,
                         last_line_number, last_synced_at, status, events_count
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(file_path) DO UPDATE SET
+                        inode = excluded.inode,
                         status = excluded.status,
                         last_synced_at = excluded.last_synced_at
-                """, (file_key, mtime, offset, line_no, now_str, f"ERROR: {e}", prev_events))
+                """, (file_key, file_inode, mtime, offset, line_no, now_str, f"ERROR: {e}", prev_events))
                 self.conn.commit()
 
         return stats
