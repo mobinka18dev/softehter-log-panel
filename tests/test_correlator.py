@@ -182,3 +182,45 @@ def test_correlate_rapid_consecutive_connections_same_user(memory_db):
             assert s["status"] == SessionStatus.COMPLETED.value
         else:
             assert s["status"] == SessionStatus.ACTIVE.value
+
+
+def test_correlate_duplicate_session_created_across_vpn_and_sec_logs(memory_db):
+    """
+    Regression test for:
+    UNIQUE constraint failed: vpn_sessions.virtual_hub, vpn_sessions.session_id, vpn_sessions.login_time
+    Ensures that when both vpn_YYYYMMDD.log and sec_YYYYMMDD.log emit a SESSION_CREATED event
+    with the exact same session_id and login_time, the events merge idempotently without IntegrityError.
+    """
+    correlator = SessionCorrelator(memory_db)
+
+    # Event from vpn_20261111.log (server_log with DEFAULT or HUB)
+    vpn_line = '2026-11-11 10:15:30.500 Connection "CID-501": The new session "SID-USER-[OPENVPN_L3]-50" has been created. (IP address: 91.92.208.200, Port number: 50095)'
+    ev_vpn = parse_line(vpn_line, "vpn_20261111.log", 10, default_hub="DEFAULT")
+
+    # Event from sec_20261111.log (security_log with explicit HUB "HUB")
+    sec_line = '2026-11-11 10:15:30.500 [HUB "HUB"] Connection "CID-501": The new session "SID-USER-[OPENVPN_L3]-50" has been created. (IP address: 91.92.208.200, Port number: 50095)'
+    ev_sec = parse_line(sec_line, "sec_20261111.log", 20, default_hub="HUB")
+
+    # Process first from server log
+    correlator.process_events([ev_vpn])
+
+    # Process second from security log (exact same session_id and login_time)
+    # Must NOT raise sqlite3.IntegrityError
+    correlator.process_events([ev_sec])
+
+    # Also test processing both in the same batch
+    correlator.process_events([ev_vpn, ev_sec])
+
+    cursor = memory_db.cursor()
+    cursor.execute("SELECT * FROM vpn_sessions WHERE session_id = 'SID-USER-[OPENVPN_L3]-50'")
+    rows = cursor.fetchall()
+
+    # Exactly 1 row must exist, properly merged
+    assert len(rows) == 1
+    session = rows[0]
+    assert session["session_id"] == "SID-USER-[OPENVPN_L3]-50"
+    assert session["status"] == SessionStatus.ACTIVE.value
+    assert session["login_time"] == "2026-11-11 10:15:30.500"
+    assert session["virtual_hub"] == "HUB"
+    assert "vpn_20261111.log" in session["source_logs"]
+    assert "sec_20261111.log" in session["source_logs"]

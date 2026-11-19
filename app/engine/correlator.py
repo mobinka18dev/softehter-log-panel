@@ -128,9 +128,10 @@ class SessionCorrelator:
                 cursor.execute("""
                     SELECT id, virtual_hub, login_time, logout_time, status, source_logs
                     FROM vpn_sessions
-                    WHERE session_id = ? AND (login_time = ? OR login_time IS NULL)
+                    WHERE (session_id = ? AND (login_time = ? OR login_time IS NULL))
+                       OR (virtual_hub = ? AND session_id = ? AND login_time = ?)
                     ORDER BY id DESC LIMIT 1
-                """, (sess_id, ev.timestamp))
+                """, (sess_id, ev.timestamp, hub, sess_id, ev.timestamp))
                 existing = cursor.fetchone()
 
                 now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -155,38 +156,50 @@ class SessionCorrelator:
                         conf = 1.0
 
                     target_hub = hub if hub != 'DEFAULT' else existing["virtual_hub"]
-                    cursor.execute("""
-                        UPDATE vpn_sessions
-                        SET username = COALESCE(?, username),
-                            virtual_hub = ?,
-                            client_ip = COALESCE(?, client_ip),
-                            client_port = COALESCE(?, client_port),
-                            login_time = ?,
-                            duration_seconds = ?,
-                            status = ?,
-                            status_reason = ?,
-                            confidence_score = ?,
-                            source_logs = ?,
-                            updated_at = ?
-                        WHERE id = ?
-                    """, (
-                        username, target_hub, client_ip, client_port, login_time,
-                        duration, status, reason, conf, src_str, now_ts, existing["id"]
-                    ))
+                    try:
+                        cursor.execute("""
+                            UPDATE vpn_sessions
+                            SET username = CASE WHEN ? != 'unknown' THEN ? ELSE username END,
+                                virtual_hub = ?,
+                                client_ip = COALESCE(?, client_ip),
+                                client_port = COALESCE(?, client_port),
+                                login_time = ?,
+                                duration_seconds = ?,
+                                status = ?,
+                                status_reason = ?,
+                                confidence_score = ?,
+                                source_logs = ?,
+                                updated_at = ?
+                            WHERE id = ?
+                        """, (
+                            username, username, target_hub, client_ip, client_port, login_time,
+                            duration, status, reason, conf, src_str, now_ts, existing["id"]
+                        ))
+                    except sqlite3.IntegrityError:
+                        pass
                 else:
-                    # Brand new session creation: immediately mark as ACTIVE
-                    cursor.execute("""
-                        INSERT INTO vpn_sessions (
-                            session_id, virtual_hub, username, client_ip,
-                            client_port, login_time, logout_time, duration_seconds,
-                            status, status_reason, outgoing_bytes, incoming_bytes,
-                            confidence_score, source_logs, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, 0, 0, 1.0, ?, ?, ?)
-                    """, (
-                        sess_id, hub, username, client_ip, client_port,
-                        ev.timestamp, SessionStatus.ACTIVE.value, ev.source_file,
-                        now_ts, now_ts
-                    ))
+                    # Brand new session creation: immediately mark as ACTIVE with safe ON CONFLICT merge
+                    try:
+                        cursor.execute("""
+                            INSERT INTO vpn_sessions (
+                                session_id, virtual_hub, username, client_ip,
+                                client_port, login_time, logout_time, duration_seconds,
+                                status, status_reason, outgoing_bytes, incoming_bytes,
+                                confidence_score, source_logs, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, 0, 0, 1.0, ?, ?, ?)
+                            ON CONFLICT(virtual_hub, session_id, login_time) DO UPDATE SET
+                                username = CASE WHEN excluded.username != 'unknown' THEN excluded.username ELSE vpn_sessions.username END,
+                                client_ip = COALESCE(excluded.client_ip, vpn_sessions.client_ip),
+                                client_port = COALESCE(excluded.client_port, vpn_sessions.client_port),
+                                source_logs = vpn_sessions.source_logs || ',' || excluded.source_logs,
+                                updated_at = excluded.updated_at
+                        """, (
+                            sess_id, hub, username, client_ip, client_port,
+                            ev.timestamp, SessionStatus.ACTIVE.value, ev.source_file,
+                            now_ts, now_ts
+                        ))
+                    except sqlite3.IntegrityError:
+                        pass
 
             # Handle SESSION_TERMINATED
             elif ev.event_type == EventType.SESSION_TERMINATED and ev.session_id:
@@ -215,46 +228,53 @@ class SessionCorrelator:
                     duration = self._calc_duration(login_time, logout_time) if login_time else None
 
                     target_hub = hub if hub != 'DEFAULT' else existing["virtual_hub"]
-                    cursor.execute("""
-                        UPDATE vpn_sessions
-                        SET virtual_hub = ?,
-                            logout_time = ?,
-                            duration_seconds = ?,
-                            status = 'COMPLETED',
-                            status_reason = NULL,
-                            outgoing_bytes = MAX(outgoing_bytes, ?),
-                            incoming_bytes = MAX(incoming_bytes, ?),
-                            confidence_score = 1.0,
-                            source_logs = ?,
-                            updated_at = ?
-                        WHERE id = ?
-                    """, (
-                        target_hub, logout_time, duration, out_bytes,
-                        in_bytes, src_str, now_ts, existing["id"]
-                    ))
+                    try:
+                        cursor.execute("""
+                            UPDATE vpn_sessions
+                            SET virtual_hub = ?,
+                                logout_time = ?,
+                                duration_seconds = ?,
+                                status = 'COMPLETED',
+                                status_reason = NULL,
+                                outgoing_bytes = MAX(outgoing_bytes, ?),
+                                incoming_bytes = MAX(incoming_bytes, ?),
+                                confidence_score = 1.0,
+                                source_logs = ?,
+                                updated_at = ?
+                            WHERE id = ?
+                        """, (
+                            target_hub, logout_time, duration, out_bytes,
+                            in_bytes, src_str, now_ts, existing["id"]
+                        ))
+                    except sqlite3.IntegrityError:
+                        pass
                 else:
                     # Check if this termination was already recorded (e.g. duplicate event from both logs)
                     cursor.execute("""
                         SELECT id, source_logs, virtual_hub
                         FROM vpn_sessions
-                        WHERE session_id = ? AND logout_time = ?
+                        WHERE (session_id = ? AND logout_time = ?)
+                           OR (virtual_hub = ? AND session_id = ? AND logout_time = ?)
                         ORDER BY id DESC LIMIT 1
-                    """, (sess_id, ev.timestamp))
+                    """, (sess_id, ev.timestamp, hub, sess_id, ev.timestamp))
                     dup_term = cursor.fetchone()
                     if dup_term:
                         sources = set(dup_term["source_logs"].split(",") if dup_term["source_logs"] else [])
                         sources.add(ev.source_file)
                         src_str = ",".join(filter(None, sources))
                         target_hub = hub if hub != 'DEFAULT' else dup_term["virtual_hub"]
-                        cursor.execute("""
-                            UPDATE vpn_sessions
-                            SET virtual_hub = ?,
-                                outgoing_bytes = MAX(outgoing_bytes, ?),
-                                incoming_bytes = MAX(incoming_bytes, ?),
-                                source_logs = ?,
-                                updated_at = ?
-                            WHERE id = ?
-                        """, (target_hub, out_bytes, in_bytes, src_str, now_ts, dup_term["id"]))
+                        try:
+                            cursor.execute("""
+                                UPDATE vpn_sessions
+                                SET virtual_hub = ?,
+                                    outgoing_bytes = MAX(outgoing_bytes, ?),
+                                    incoming_bytes = MAX(incoming_bytes, ?),
+                                    source_logs = ?,
+                                    updated_at = ?
+                                WHERE id = ?
+                            """, (target_hub, out_bytes, in_bytes, src_str, now_ts, dup_term["id"]))
+                        except sqlite3.IntegrityError:
+                            pass
                     else:
                         # Termination without prior login found
                         username = ev.username
@@ -264,19 +284,27 @@ class SessionCorrelator:
                                 username = parts[1]
                         username = username or "unknown"
 
-                        cursor.execute("""
-                            INSERT INTO vpn_sessions (
-                                session_id, virtual_hub, username, client_ip,
-                                client_port, login_time, logout_time, duration_seconds,
-                                status, status_reason, outgoing_bytes, incoming_bytes,
-                                confidence_score, source_logs, created_at, updated_at
-                            ) VALUES (?, ?, ?, NULL, NULL, NULL, ?, NULL, ?, ?, ?, ?, 0.5, ?, ?, ?)
-                        """, (
-                            sess_id, hub, username, ev.timestamp,
-                            SessionStatus.INCOMPLETE.value,
-                            "Missing login event (session began before log window)",
-                            out_bytes, in_bytes, ev.source_file, now_ts, now_ts
-                        ))
+                        try:
+                            cursor.execute("""
+                                INSERT INTO vpn_sessions (
+                                    session_id, virtual_hub, username, client_ip,
+                                    client_port, login_time, logout_time, duration_seconds,
+                                    status, status_reason, outgoing_bytes, incoming_bytes,
+                                    confidence_score, source_logs, created_at, updated_at
+                                ) VALUES (?, ?, ?, NULL, NULL, NULL, ?, NULL, ?, ?, ?, ?, 0.5, ?, ?, ?)
+                                ON CONFLICT(virtual_hub, session_id, login_time) DO UPDATE SET
+                                    outgoing_bytes = MAX(vpn_sessions.outgoing_bytes, excluded.outgoing_bytes),
+                                    incoming_bytes = MAX(vpn_sessions.incoming_bytes, excluded.incoming_bytes),
+                                    source_logs = vpn_sessions.source_logs || ',' || excluded.source_logs,
+                                    updated_at = excluded.updated_at
+                            """, (
+                                sess_id, hub, username, ev.timestamp,
+                                SessionStatus.INCOMPLETE.value,
+                                "Missing login event (session began before log window)",
+                                out_bytes, in_bytes, ev.source_file, now_ts, now_ts
+                            ))
+                        except sqlite3.IntegrityError:
+                            pass
 
             # Handle AUTH_SUCCESS: update any sessions with unknown username
             elif ev.event_type == EventType.AUTH_SUCCESS and ev.username:
