@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query, Response
 from app.database import get_db
-from app.api.deps import get_current_user, record_audit
+from app.api.deps import get_current_user, record_audit, get_user_vpn_scope, build_scope_filter
 from app.core.jalali import parse_filter_date, gregorian_to_jalali, format_duration
 from app.reports.excel import generate_excel_report
 from app.reports.csv_export import generate_csv_report
@@ -14,14 +14,20 @@ def _fetch_filtered_data(
     virtual_hub: str | None = None,
     status: str | None = None,
     date_from: str | None = None,
-    date_to: str | None = None
+    date_to: str | None = None,
+    scope: list[str] | None = None
 ) -> tuple[list[dict], dict]:
-    """Helper to fetch exact filtered rows and summary for exports."""
+    """Helper to fetch exact filtered rows and summary for exports, strictly scoped."""
     g_from = parse_filter_date(date_from, is_end_of_day=False) if date_from else None
     g_to = parse_filter_date(date_to, is_end_of_day=True) if date_to else None
 
     conditions = ["1=1"]
     params: list = []
+
+    if scope:
+        scope_cond, scope_params = build_scope_filter(scope, "username")
+        conditions.append(scope_cond)
+        params.extend(scope_params)
 
     if username and username.strip():
         conditions.append("username LIKE ?")
@@ -105,13 +111,15 @@ def export_excel(
     lang: str = Query(default="fa"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Export filtered VPN session report to professional Excel spreadsheet."""
+    """Export filtered VPN session report to professional Excel spreadsheet (strictly scoped)."""
+    scope = get_user_vpn_scope(current_user)
     rows, summary = _fetch_filtered_data(
         username=username,
         virtual_hub=virtual_hub,
         status=status,
         date_from=date_from,
-        date_to=date_to
+        date_to=date_to,
+        scope=scope
     )
 
     excel_bytes = generate_excel_report(
@@ -150,13 +158,15 @@ def export_csv(
     lang: str = Query(default="fa"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Export filtered VPN session report to Excel-compatible CSV (UTF-8 BOM)."""
+    """Export filtered VPN session report to Excel-compatible CSV (UTF-8 BOM, strictly scoped)."""
+    scope = get_user_vpn_scope(current_user)
     rows, _ = _fetch_filtered_data(
         username=username,
         virtual_hub=virtual_hub,
         status=status,
         date_from=date_from,
-        date_to=date_to
+        date_to=date_to,
+        scope=scope
     )
 
     csv_bytes = generate_csv_report(sessions=rows, lang=lang)

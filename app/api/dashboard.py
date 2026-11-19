@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query
 from app.database import get_db
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_user_vpn_scope, build_scope_filter
 from app.core.jalali import gregorian_to_jalali, format_duration
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -9,32 +9,35 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 @router.get("/summary")
 def get_dashboard_summary(current_user: dict = Depends(get_current_user)):
-    """Summary metrics calculated from imported VPN logs."""
+    """Summary metrics calculated from imported VPN logs (scoped to user access)."""
+    scope = get_user_vpn_scope(current_user)
+    scope_cond, scope_params = build_scope_filter(scope, "username")
+
     with get_db() as conn:
         cursor = conn.cursor()
 
-        cursor.execute("SELECT COUNT(DISTINCT username) as cnt FROM vpn_sessions WHERE username != 'unknown'")
+        cursor.execute(f"SELECT COUNT(DISTINCT username) as cnt FROM vpn_sessions WHERE {scope_cond} AND username != 'unknown'", scope_params)
         total_vpn_users = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'COMPLETED'")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM vpn_sessions WHERE {scope_cond} AND status = 'COMPLETED'", scope_params)
         completed_sessions = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'ACTIVE'")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM vpn_sessions WHERE {scope_cond} AND status = 'ACTIVE'", scope_params)
         active_sessions = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'INCOMPLETE'")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM vpn_sessions WHERE {scope_cond} AND status = 'INCOMPLETE'", scope_params)
         incomplete_sessions = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'UNVERIFIED'")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM vpn_sessions WHERE {scope_cond} AND status = 'UNVERIFIED'", scope_params)
         unverified_sessions = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT COALESCE(SUM(duration_seconds), 0) as s FROM vpn_sessions WHERE status = 'COMPLETED'")
+        cursor.execute(f"SELECT COALESCE(SUM(duration_seconds), 0) as s FROM vpn_sessions WHERE {scope_cond} AND status = 'COMPLETED'", scope_params)
         total_duration = cursor.fetchone()["s"]
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_raw_events")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM vpn_raw_events WHERE {scope_cond}", scope_params)
         total_events = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT COUNT(DISTINCT virtual_hub) as cnt FROM vpn_sessions")
+        cursor.execute(f"SELECT COUNT(DISTINCT virtual_hub) as cnt FROM vpn_sessions WHERE {scope_cond}", scope_params)
         total_hubs = cursor.fetchone()["cnt"]
 
         return {
@@ -56,10 +59,13 @@ def get_top_users(
     limit: int = Query(default=10, ge=1, le=50),
     current_user: dict = Depends(get_current_user)
 ):
-    """Top active VPN users ranked by total connection duration."""
+    """Top active VPN users ranked by total connection duration (scoped to user access)."""
+    scope = get_user_vpn_scope(current_user)
+    scope_cond, scope_params = build_scope_filter(scope, "username")
+
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT 
                 username,
                 COUNT(*) as sessions_count,
@@ -67,11 +73,11 @@ def get_top_users(
                 MAX(login_time) as last_seen,
                 MAX(client_ip) as last_ip
             FROM vpn_sessions
-            WHERE username != 'unknown'
+            WHERE {scope_cond} AND username != 'unknown'
             GROUP BY username
             ORDER BY total_duration DESC, sessions_count DESC
             LIMIT ?
-        """, (limit,))
+        """, scope_params + [limit])
         rows = cursor.fetchall()
 
         result = []
@@ -93,20 +99,23 @@ def get_activity_chart(
     days: int = Query(default=14, ge=3, le=90),
     current_user: dict = Depends(get_current_user)
 ):
-    """Daily aggregated session counts and duration for timeline chart."""
+    """Daily aggregated session counts and duration for timeline chart (scoped to user access)."""
+    scope = get_user_vpn_scope(current_user)
+    scope_cond, scope_params = build_scope_filter(scope, "username")
+
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT 
                 SUBSTR(login_time, 1, 10) as day,
                 COUNT(*) as session_count,
                 SUM(COALESCE(duration_seconds, 0)) as duration_seconds
             FROM vpn_sessions
-            WHERE login_time IS NOT NULL
+            WHERE {scope_cond} AND login_time IS NOT NULL
             GROUP BY SUBSTR(login_time, 1, 10)
             ORDER BY day DESC
             LIMIT ?
-        """, (days,))
+        """, scope_params + [days])
         rows = cursor.fetchall()
 
         # Reverse to chronological order (oldest to newest)
@@ -128,17 +137,21 @@ def get_recent_events(
     limit: int = Query(default=10, ge=1, le=50),
     current_user: dict = Depends(get_current_user)
 ):
-    """Recent connection and authentication events."""
+    """Recent connection and authentication events (scoped to user access)."""
+    scope = get_user_vpn_scope(current_user)
+    scope_cond, scope_params = build_scope_filter(scope, "username")
+
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT 
                 timestamp, virtual_hub, event_type, username, 
                 session_id, connection_id, client_ip
             FROM vpn_raw_events
+            WHERE {scope_cond}
             ORDER BY id DESC
             LIMIT ?
-        """, (limit,))
+        """, scope_params + [limit])
         rows = cursor.fetchall()
         result = []
         for r in rows:
@@ -156,10 +169,13 @@ def get_recent_events(
 
 @router.get("/quality-report")
 def get_quality_report(current_user: dict = Depends(get_current_user)):
-    """Parser confidence and data-quality audit report."""
+    """Parser confidence and data-quality audit report (scoped to user access)."""
+    scope = get_user_vpn_scope(current_user)
+    scope_cond, scope_params = build_scope_filter(scope, "username")
+
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) as total FROM vpn_sessions")
+        cursor.execute(f"SELECT COUNT(*) as total FROM vpn_sessions WHERE {scope_cond}", scope_params)
         total = cursor.fetchone()["total"]
 
         if total == 0:
@@ -174,25 +190,25 @@ def get_quality_report(current_user: dict = Depends(get_current_user)):
                 "server_restarts": 0
             }
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'COMPLETED'")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM vpn_sessions WHERE {scope_cond} AND status = 'COMPLETED'", scope_params)
         completed = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'ACTIVE'")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM vpn_sessions WHERE {scope_cond} AND status = 'ACTIVE'", scope_params)
         active = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'INCOMPLETE'")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM vpn_sessions WHERE {scope_cond} AND status = 'INCOMPLETE'", scope_params)
         incomplete = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status = 'UNVERIFIED'")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM vpn_sessions WHERE {scope_cond} AND status = 'UNVERIFIED'", scope_params)
         unverified = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status_reason LIKE '%Missing login%'")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM vpn_sessions WHERE {scope_cond} AND status_reason LIKE '%Missing login%'", scope_params)
         missing_logins = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions WHERE status_reason LIKE '%restart%'")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM vpn_sessions WHERE {scope_cond} AND status_reason LIKE '%restart%'", scope_params)
         server_restarts = cursor.fetchone()["cnt"]
 
-        cursor.execute("SELECT AVG(confidence_score) as avg_conf FROM vpn_sessions")
+        cursor.execute(f"SELECT AVG(confidence_score) as avg_conf FROM vpn_sessions WHERE {scope_cond}", scope_params)
         avg_conf = cursor.fetchone()["avg_conf"] or 1.0
 
         return {
@@ -210,17 +226,20 @@ def get_quality_report(current_user: dict = Depends(get_current_user)):
 
 @router.get("/active-sessions")
 def get_active_sessions(current_user: dict = Depends(get_current_user)):
-    """Return currently active VPN sessions with real-time calculated duration."""
+    """Return currently active VPN sessions with real-time calculated duration (scoped to user access)."""
+    scope = get_user_vpn_scope(current_user)
+    scope_cond, scope_params = build_scope_filter(scope, "username")
+
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT 
                 session_id, username, virtual_hub, client_ip, client_port,
                 login_time, status, status_reason, confidence_score
             FROM vpn_sessions
-            WHERE status = 'ACTIVE'
+            WHERE {scope_cond} AND status = 'ACTIVE'
             ORDER BY login_time DESC
-        """)
+        """, scope_params)
         rows = cursor.fetchall()
         now_local = datetime.now()
         result = []

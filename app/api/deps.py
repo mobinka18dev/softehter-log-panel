@@ -5,6 +5,7 @@ import sqlite3
 from app.config import settings
 from app.database import get_db
 from app.core.security import decode_access_token
+from app.core.scoping import get_user_vpn_scope, build_scope_filter
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
@@ -33,7 +34,7 @@ def get_current_user_optional(
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, username, full_name, role, is_active, last_login_at
+            SELECT id, username, full_name, role, is_active, last_login_at, allowed_vpn_users
             FROM panel_users
             WHERE username = ?
         """, (username,))

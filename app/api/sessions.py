@@ -1,7 +1,7 @@
 import math
 from fastapi import APIRouter, Depends, Query
 from app.database import get_db
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_user_vpn_scope, build_scope_filter
 from app.core.jalali import parse_filter_date, gregorian_to_jalali, format_duration
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -12,34 +12,40 @@ def get_usernames(
     query: str = Query(default="", max_length=50),
     current_user: dict = Depends(get_current_user)
 ):
-    """Autocomplete list of distinct VPN usernames found in logs."""
+    """Autocomplete list of distinct VPN usernames found in logs (scoped to user access)."""
+    scope = get_user_vpn_scope(current_user)
+    scope_cond, scope_params = build_scope_filter(scope, "username")
+
     with get_db() as conn:
         cursor = conn.cursor()
         if query.strip():
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT DISTINCT username 
                 FROM vpn_sessions 
-                WHERE username LIKE ? AND username != 'unknown'
+                WHERE {scope_cond} AND username LIKE ? AND username != 'unknown'
                 ORDER BY username ASC 
                 LIMIT 30
-            """, (f"%{query.strip()}%",))
+            """, scope_params + [f"%{query.strip()}%"])
         else:
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT DISTINCT username 
                 FROM vpn_sessions 
-                WHERE username != 'unknown'
+                WHERE {scope_cond} AND username != 'unknown'
                 ORDER BY username ASC 
                 LIMIT 50
-            """)
+            """, scope_params)
         return [row["username"] for row in cursor.fetchall()]
 
 
 @router.get("/hubs")
 def get_virtual_hubs(current_user: dict = Depends(get_current_user)):
-    """List of distinct Virtual Hubs found in logs."""
+    """List of distinct Virtual Hubs found in logs (scoped to user access)."""
+    scope = get_user_vpn_scope(current_user)
+    scope_cond, scope_params = build_scope_filter(scope, "username")
+
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT virtual_hub FROM vpn_sessions ORDER BY virtual_hub ASC")
+        cursor.execute(f"SELECT DISTINCT virtual_hub FROM vpn_sessions WHERE {scope_cond} ORDER BY virtual_hub ASC", scope_params)
         return [row["virtual_hub"] for row in cursor.fetchall()]
 
 
@@ -56,13 +62,20 @@ def list_sessions(
 ):
     """
     Search and filter VPN sessions with pagination and detailed aggregate summary.
-    Includes full-day coverage for end-date (up to 23:59:59).
+    Enforces strict VPN username scoping per panel user.
     """
+    scope = get_user_vpn_scope(current_user)
+
     g_from = parse_filter_date(date_from, is_end_of_day=False) if date_from else None
     g_to = parse_filter_date(date_to, is_end_of_day=True) if date_to else None
 
     conditions = ["1=1"]
     params: list = []
+
+    if scope:
+        scope_cond, scope_params = build_scope_filter(scope, "username")
+        conditions.append(scope_cond)
+        params.extend(scope_params)
 
     if username and username.strip():
         conditions.append("username LIKE ?")

@@ -91,7 +91,7 @@ def login(req: LoginRequest, request: Request, response: Response):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, username, password_hash, full_name, role, is_active
+            SELECT id, username, password_hash, full_name, role, is_active, allowed_vpn_users
             FROM panel_users
             WHERE username = ?
         """, (req.username.strip(),))
@@ -148,6 +148,14 @@ def login(req: LoginRequest, request: Request, response: Response):
         ip_address=client_ip
     )
 
+    import json
+    allowed = None
+    if user["allowed_vpn_users"]:
+        try:
+            allowed = json.loads(user["allowed_vpn_users"]) if isinstance(user["allowed_vpn_users"], str) else user["allowed_vpn_users"]
+        except Exception:
+            allowed = None
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -155,7 +163,8 @@ def login(req: LoginRequest, request: Request, response: Response):
             "id": user["id"],
             "username": user["username"],
             "full_name": user["full_name"],
-            "role": user["role"]
+            "role": user["role"],
+            "allowed_vpn_users": allowed
         }
     }
 
@@ -176,10 +185,18 @@ def logout(response: Response, current_user: dict | None = Depends(get_current_u
 @router.get("/me")
 def get_me(current_user: dict = Depends(get_current_user)):
     """Return currently authenticated user profile."""
+    import json
+    allowed = None
+    if current_user.get("allowed_vpn_users"):
+        try:
+            allowed = json.loads(current_user["allowed_vpn_users"]) if isinstance(current_user["allowed_vpn_users"], str) else current_user["allowed_vpn_users"]
+        except Exception:
+            allowed = None
     return {
         "id": current_user["id"],
         "username": current_user["username"],
         "full_name": current_user["full_name"],
         "role": current_user["role"],
+        "allowed_vpn_users": allowed,
         "last_login_at": current_user.get("last_login_at")
     }

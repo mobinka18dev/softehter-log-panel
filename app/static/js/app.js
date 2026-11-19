@@ -279,12 +279,145 @@ const App = {
       err.style.display = "none";
       err.innerText = "";
     }
+    const radioAll = document.getElementById("add-user-scope-type-all");
+    if (radioAll) radioAll.checked = true;
+    const container = document.getElementById("add-user-scope-container");
+    if (container) container.style.display = "none";
+
     const modal = document.getElementById("add-user-modal");
     if (modal) modal.style.display = "flex";
   },
 
   hideAddUserModal() {
     const modal = document.getElementById("add-user-modal");
+    if (modal) modal.style.display = "none";
+  },
+
+  toggleAddUserScopeMode(mode) {
+    const container = document.getElementById("add-user-scope-container");
+    if (!container) return;
+    if (mode === "restricted") {
+      container.style.display = "block";
+      this.populateScopeCheckboxes("add");
+    } else {
+      container.style.display = "none";
+    }
+  },
+
+  toggleEditScopeMode(mode) {
+    const container = document.getElementById("edit-scope-container");
+    if (!container) return;
+    if (mode === "restricted") {
+      container.style.display = "block";
+    } else {
+      container.style.display = "none";
+    }
+  },
+
+  async populateScopeCheckboxes(target, selectedUsers = []) {
+    const containerId = target === "add" ? "add-user-scope-checkboxes" : "edit-scope-checkboxes";
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    let allUsernames = [];
+    try {
+      const res = await fetch("/api/sessions/usernames", { headers: this.getAuthHeaders() });
+      if (res.ok) {
+        allUsernames = await res.json();
+      }
+    } catch (e) {
+      console.warn("Error fetching usernames for scope:", e);
+    }
+
+    const userSet = new Set([...allUsernames, ...selectedUsers]);
+    const sorted = Array.from(userSet).filter(u => u && u !== "unknown").sort();
+
+    if (sorted.length === 0) {
+      container.innerHTML = `<span style="font-size:11px; color:var(--text-muted);">کاربری در لاگ‌ها یافت نشد. می‌توانید با فیلد زیر کاربر اضافه کنید.</span>`;
+      return;
+    }
+
+    const esc = this.escapeHtml;
+    container.innerHTML = sorted.map(u => {
+      const isChecked = selectedUsers.includes(u);
+      return `
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
+          <input type="checkbox" value="${esc(u)}" ${isChecked ? 'checked' : ''} class="${target}-scope-checkbox">
+          <code>${esc(u)}</code>
+        </label>
+      `;
+    }).join("");
+  },
+
+  addScopeCustomUser(target) {
+    const inputId = target === "add" ? "add-user-scope-custom" : "edit-scope-custom";
+    const containerId = target === "add" ? "add-user-scope-checkboxes" : "edit-scope-checkboxes";
+    const input = document.getElementById(inputId);
+    const container = document.getElementById(containerId);
+    if (!input || !container) return;
+
+    const val = input.value.trim();
+    if (!val) return;
+
+    const existing = container.querySelector(`input[value="${val}"]`);
+    if (existing) {
+      existing.checked = true;
+      input.value = "";
+      return;
+    }
+
+    const esc = this.escapeHtml;
+    const label = document.createElement("label");
+    label.style.display = "flex";
+    label.style.alignItems = "center";
+    label.style.gap = "8px";
+    label.style.fontSize = "12px";
+    label.style.cursor = "pointer";
+    label.innerHTML = `
+      <input type="checkbox" value="${esc(val)}" checked class="${target}-scope-checkbox">
+      <code>${esc(val)}</code>
+    `;
+    container.prepend(label);
+    input.value = "";
+  },
+
+  async openEditScopeModal(id, username, allowedData) {
+    let allowedList = [];
+    if (typeof allowedData === "string") {
+      try {
+        allowedList = JSON.parse(allowedData);
+      } catch (e) {
+        allowedList = [];
+      }
+    } else if (Array.isArray(allowedData)) {
+      allowedList = allowedData;
+    }
+
+    document.getElementById("edit-scope-user-id").value = id;
+    document.getElementById("edit-scope-username").innerText = username;
+    const err = document.getElementById("edit-scope-error");
+    if (err) {
+      err.style.display = "none";
+      err.innerText = "";
+    }
+
+    const isRestricted = allowedList.length > 0;
+    const radioAll = document.getElementById("edit-user-scope-type-all");
+    const radioRestricted = document.getElementById("edit-user-scope-type-restricted");
+    if (isRestricted) {
+      if (radioRestricted) radioRestricted.checked = true;
+      document.getElementById("edit-scope-container").style.display = "block";
+    } else {
+      if (radioAll) radioAll.checked = true;
+      document.getElementById("edit-scope-container").style.display = "none";
+    }
+
+    await this.populateScopeCheckboxes("edit", allowedList);
+    document.getElementById("edit-scope-modal").style.display = "flex";
+  },
+
+  hideEditScopeModal() {
+    const modal = document.getElementById("edit-scope-modal");
     if (modal) modal.style.display = "none";
   },
 
@@ -447,6 +580,15 @@ const App = {
           return;
         }
 
+        const isRestricted = document.getElementById("add-user-scope-type-restricted")?.checked;
+        let allowedVpnUsers = null;
+        if (isRestricted) {
+          const checked = Array.from(document.querySelectorAll(".add-scope-checkbox:checked"))
+            .map(cb => cb.value.trim())
+            .filter(Boolean);
+          allowedVpnUsers = checked;
+        }
+
         const submitBtn = document.getElementById("btn-submit-add-user");
         if (submitBtn) submitBtn.disabled = true;
 
@@ -458,7 +600,8 @@ const App = {
               username: username,
               full_name: fullName,
               role: role,
-              password: password
+              password: password,
+              allowed_vpn_users: allowedVpnUsers
             })
           });
 
@@ -474,6 +617,59 @@ const App = {
         } catch (err) {
           errEl.innerText = "ارتباط با سرور برقرار نشد.";
           errEl.style.display = "block";
+        } finally {
+          if (submitBtn) submitBtn.disabled = false;
+        }
+      });
+    }
+
+    // Edit VPN Scope Form Submission
+    const editScopeForm = document.getElementById("edit-scope-form");
+    if (editScopeForm) {
+      editScopeForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById("edit-scope-error");
+        if (errEl) errEl.style.display = "none";
+
+        const userId = document.getElementById("edit-scope-user-id").value;
+        const isRestricted = document.getElementById("edit-user-scope-type-restricted")?.checked;
+
+        let allowedVpnUsers = null;
+        if (isRestricted) {
+          const checked = Array.from(document.querySelectorAll(".edit-scope-checkbox:checked"))
+            .map(cb => cb.value.trim())
+            .filter(Boolean);
+          allowedVpnUsers = checked;
+        }
+
+        const submitBtn = document.getElementById("btn-submit-edit-scope");
+        if (submitBtn) submitBtn.disabled = true;
+
+        try {
+          const res = await fetch(`/api/panel-users/${userId}`, {
+            method: "PUT",
+            headers: this.getAuthHeaders(),
+            body: JSON.stringify({
+              allowed_vpn_users: allowedVpnUsers
+            })
+          });
+
+          if (res.ok) {
+            alert("دسترسی کاربر به لاگ‌ها با موفقیت بروزرسانی شد.");
+            this.hideEditScopeModal();
+            this.loadUsers();
+          } else {
+            const data = await res.json();
+            if (errEl) {
+              errEl.innerText = data.detail || "خطا در ویرایش دسترسی";
+              errEl.style.display = "block";
+            }
+          }
+        } catch (err) {
+          if (errEl) {
+            errEl.innerText = "ارتباط با سرور برقرار نشد.";
+            errEl.style.display = "block";
+          }
         } finally {
           if (submitBtn) submitBtn.disabled = false;
         }
@@ -992,15 +1188,33 @@ const App = {
       if (btnAddUser) btnAddUser.style.display = isSuper ? "inline-flex" : "none";
 
       const esc = this.escapeHtml;
-      tbody.innerHTML = users.map(u => `
+      tbody.innerHTML = users.map(u => {
+        let scopeBadge = "";
+        if (u.role === "superadmin") {
+          scopeBadge = `<span class="badge badge-completed" title="دسترسی نامحدود مدیر ارشد">همه کاربران (نامحدود)</span>`;
+        } else if (!u.allowed_vpn_users || u.allowed_vpn_users.length === 0) {
+          scopeBadge = `<span class="badge badge-completed">همه کاربران</span>`;
+        } else {
+          const listStr = u.allowed_vpn_users.join(", ");
+          scopeBadge = `<span class="badge badge-unverified" title="${esc(listStr)}">محدود به (${u.allowed_vpn_users.length} کاربر)</span>`;
+        }
+
+        const canEditScope = isSuper && u.role !== "superadmin";
+        const allowedJson = encodeURIComponent(JSON.stringify(u.allowed_vpn_users || []));
+
+        return `
         <tr>
           <td><strong>${esc(u.username)}</strong></td>
           <td>${esc(u.full_name) || "-"}</td>
           <td><span class="badge badge-active">${esc(u.role)}</span></td>
+          <td>${scopeBadge}</td>
           <td>${u.is_active ? 'فعال' : 'غیرفعال'}</td>
           <td>${esc(u.created_at)}</td>
           <td>${esc(u.last_login_at) || "-"}</td>
           <td>
+            ${canEditScope ? `
+              <button class="btn btn-secondary btn-sm" onclick="App.openEditScopeModal(${u.id}, '${esc(u.username)}', decodeURIComponent('${allowedJson}'))">ویرایش دسترسی</button>
+            ` : ''}
             ${(isSuper || u.id === App.state.currentUser.id) ? `
               <button class="btn btn-secondary btn-sm" onclick="App.openResetPwd(${u.id}, '${esc(u.username)}')">رمز</button>
             ` : ''}
@@ -1009,7 +1223,8 @@ const App = {
             ` : ''}
           </td>
         </tr>
-      `).join("");
+      `;
+      }).join("");
     } catch (e) {
       console.error(e);
     }

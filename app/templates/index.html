@@ -417,6 +417,7 @@
                     <th data-i18n="username">نام کاربری</th>
                     <th>نام و نشان</th>
                     <th data-i18n="role">نقش</th>
+                    <th>محدوده دسترسی VPN</th>
                     <th data-i18n="activeState">وضعیت</th>
                     <th>تاریخ ایجاد</th>
                     <th>آخرین ورود</th>
@@ -524,6 +525,29 @@
             <option value="superadmin">مدیر ارشد (Superadmin) — دسترسی کامل: ایجاد/حذف کاربران، ریست رمز و مشاهده لاگ‌های ممیزی</option>
           </select>
         </div>
+        <div class="form-group" id="add-user-scope-group" style="margin-bottom:14px;">
+          <label class="form-label">محدوده مشاهده لاگ کاربران SoftEther VPN</label>
+          <div style="display:flex; gap:16px; margin-bottom:8px;">
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
+              <input type="radio" name="add-user-scope-type" id="add-user-scope-type-all" value="all" checked onchange="App.toggleAddUserScopeMode('all')">
+              همه کاربران VPN (بدون محدودیت)
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
+              <input type="radio" name="add-user-scope-type" id="add-user-scope-type-restricted" value="restricted" onchange="App.toggleAddUserScopeMode('restricted')">
+              فقط کاربران انتخاب‌شده
+            </label>
+          </div>
+          <div id="add-user-scope-container" style="display:none; border:1px solid var(--border-color); border-radius:8px; padding:10px; background:var(--bg-secondary);">
+            <div style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">کاربران مجاز را انتخاب کنید یا نام کاربری اضافه نمایید:</div>
+            <div id="add-user-scope-checkboxes" style="max-height:120px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-bottom:8px; padding:4px;">
+              <!-- Populated dynamically -->
+            </div>
+            <div style="display:flex; gap:6px;">
+              <input type="text" class="form-input form-input-sm" id="add-user-scope-custom" placeholder="افزودن نام کاربری دستی..." style="font-size:12px; padding:4px 8px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="App.addScopeCustomUser('add')">افزودن</button>
+            </div>
+          </div>
+        </div>
         <div class="form-group" style="margin-bottom:12px;">
           <label class="form-label">رمز عبور (حداقل ۸ کاراکتر)</label>
           <input type="password" class="form-input" id="add-user-password" required minlength="8" autocomplete="new-password">
@@ -536,6 +560,49 @@
         <div style="display:flex; gap:10px; justify-content:flex-end;">
           <button type="button" class="btn btn-secondary" onclick="App.hideAddUserModal()" data-i18n="cancel">انصراف</button>
           <button type="submit" class="btn btn-primary" id="btn-submit-add-user" data-i18n="save">ثبت و ایجاد کاربر</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Edit VPN User Scope -->
+  <div class="modal-overlay" id="edit-scope-modal" style="display:none;">
+    <div class="modal-content" style="max-width:520px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h2 style="margin:0; font-size:1.15rem;">ویرایش دسترسی به کاربران VPN</h2>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="App.hideEditScopeModal()" style="padding:4px 8px; border-radius:6px;">✕</button>
+      </div>
+      <p style="color:var(--text-muted); font-size:12px; margin-bottom:16px;">
+        تعیین محدوده لاگ‌های قابل مشاهده برای کاربر <strong id="edit-scope-username"></strong>:
+      </p>
+      <form id="edit-scope-form">
+        <input type="hidden" id="edit-scope-user-id">
+        <div class="form-group" style="margin-bottom:14px;">
+          <div style="display:flex; gap:16px; margin-bottom:10px;">
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
+              <input type="radio" name="edit-user-scope-type" id="edit-user-scope-type-all" value="all" checked onchange="App.toggleEditScopeMode('all')">
+              همه کاربران VPN (بدون محدودیت)
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
+              <input type="radio" name="edit-user-scope-type" id="edit-user-scope-type-restricted" value="restricted" onchange="App.toggleEditScopeMode('restricted')">
+              فقط کاربران انتخاب‌شده
+            </label>
+          </div>
+          <div id="edit-scope-container" style="display:none; border:1px solid var(--border-color); border-radius:8px; padding:10px; background:var(--bg-secondary);">
+            <div style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">کاربران مجاز را انتخاب کنید یا نام کاربری اضافه نمایید:</div>
+            <div id="edit-scope-checkboxes" style="max-height:150px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-bottom:8px; padding:4px;">
+              <!-- Populated dynamically -->
+            </div>
+            <div style="display:flex; gap:6px;">
+              <input type="text" class="form-input form-input-sm" id="edit-scope-custom" placeholder="افزودن نام کاربری دستی..." style="font-size:12px; padding:4px 8px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="App.addScopeCustomUser('edit')">افزودن</button>
+            </div>
+          </div>
+        </div>
+        <div id="edit-scope-error" style="color:var(--accent-rose); font-size:12px; margin-bottom:14px; display:none;"></div>
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+          <button type="button" class="btn btn-secondary" onclick="App.hideEditScopeModal()" data-i18n="cancel">انصراف</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-edit-scope" data-i18n="save">ذخیره دسترسی</button>
         </div>
       </form>
     </div>

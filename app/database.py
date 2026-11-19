@@ -40,7 +40,8 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL,
             last_login_at TEXT,
             failed_login_attempts INTEGER DEFAULT 0,
-            locked_until TEXT
+            locked_until TEXT,
+            allowed_vpn_users TEXT DEFAULT NULL
         );
     """)
 
@@ -123,6 +124,12 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
     existing_cols = [col["name"] if isinstance(col, sqlite3.Row) else col[1] for col in cursor.fetchall()]
     if existing_cols and "inode" not in existing_cols:
         cursor.execute("ALTER TABLE sync_state ADD COLUMN inode INTEGER DEFAULT 0;")
+
+    # Safe migration: ensure allowed_vpn_users column exists in panel_users if created in an earlier phase
+    cursor.execute("PRAGMA table_info(panel_users);")
+    user_cols = [col["name"] if isinstance(col, sqlite3.Row) else col[1] for col in cursor.fetchall()]
+    if user_cols and "allowed_vpn_users" not in user_cols:
+        cursor.execute("ALTER TABLE panel_users ADD COLUMN allowed_vpn_users TEXT DEFAULT NULL;")
 
     # Indexes for fast querying
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_vpn_sessions_username ON vpn_sessions (username);")
