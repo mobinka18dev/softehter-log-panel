@@ -135,3 +135,50 @@ def test_correlate_duplicate_events_server_and_security(memory_db):
     # Must only have 1 session stored
     cursor.execute("SELECT COUNT(*) as cnt FROM vpn_sessions")
     assert cursor.fetchone()["cnt"] == 1
+
+
+def test_correlate_rapid_consecutive_connections_same_user(memory_db):
+    """
+    Test rapid repeated connections/disconnections from the same user (e.g. 8 times).
+    Ensures that rapid reconnects are not skipped, collided, or dropped across server_log and security_log.
+    """
+    correlator = SessionCorrelator(memory_db)
+    events = []
+
+    # 8 rapid connections and disconnections
+    for i in range(1, 9):
+        cid = f"CID-{3000 + i}"
+        sid = f"SID-RAASANO-[OPENVPN_L3]-{i}"
+        port = 50000 + i
+        sec_start = f"{i*2:02d}"
+        sec_end = f"{i*2 + 1:02d}"
+
+        # 1. Auth in server_log (no HUB prefix)
+        auth_line = f'2026-11-18 16:15:{sec_start}.100 Connection "{cid}": Successfully authenticated as user "raasano".'
+        events.append(parse_line(auth_line, "vpn_server.log", i * 4 - 3, default_hub="DEFAULT"))
+
+        # 2. Session created in security_log (with HUB "HUB" prefix)
+        sess_create_line = f'2026-11-18 16:15:{sec_start}.200 [HUB "HUB"] Connection "{cid}": The new session "{sid}" has been created. (IP address: 91.92.208.200, Port number: {port}, Physical underlying protocol: "Legacy VPN - OPENVPN_L3")'
+        events.append(parse_line(sess_create_line, "security_log/sec_20261118.log", i * 4 - 2, default_hub="HUB"))
+
+        # For the first 7, disconnect them; the 8th remains ACTIVE
+        if i < 8:
+            term_line = f'2026-11-18 16:15:{sec_end}.500 [HUB "HUB"] Session "{sid}": The session has been terminated. The statistical information is as follows: Total outgoing data size: 5000 bytes, Total incoming data size: 8000 bytes.'
+            events.append(parse_line(term_line, "security_log/sec_20261118.log", i * 4 - 1, default_hub="HUB"))
+
+    correlator.process_events(events)
+
+    cursor = memory_db.cursor()
+    cursor.execute("SELECT session_id, username, virtual_hub, status FROM vpn_sessions ORDER BY id ASC")
+    sessions = cursor.fetchall()
+
+    # All 8 sessions must be recorded
+    assert len(sessions) == 8, f"Expected 8 sessions but found {len(sessions)}"
+
+    for idx, s in enumerate(sessions, 1):
+        assert s["username"] == "raasano"
+        assert s["virtual_hub"] == "HUB"
+        if idx < 8:
+            assert s["status"] == SessionStatus.COMPLETED.value
+        else:
+            assert s["status"] == SessionStatus.ACTIVE.value

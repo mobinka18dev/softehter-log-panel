@@ -34,8 +34,15 @@ class LogSynchronizer:
                     p = Path(root) / file
                     log_files.append(p)
 
-        # Sort by filename and modification time for chronological processing
-        log_files.sort(key=lambda p: (p.name, p.stat().st_mtime if p.exists() else 0))
+        # Sort chronologically by date in filename (YYYYMMDD), then modification time
+        def _file_sort_key(p: Path) -> tuple:
+            import re
+            m = re.search(r"(\d{8})", p.name)
+            date_part = m.group(1) if m else "99999999"
+            mtime = p.stat().st_mtime if p.exists() else 0
+            return (date_part, mtime, p.name)
+
+        log_files.sort(key=_file_sort_key)
         return log_files
 
     def sync(self) -> dict:
@@ -106,7 +113,7 @@ class LogSynchronizer:
                             break
 
                         # Check if line was completely written
-                        if not line.endswith("\n") and not f.tell() == file_size:
+                        if not line.endswith("\n"):
                             # Incomplete trailing line, step back and pause here
                             f.seek(tell_before)
                             break

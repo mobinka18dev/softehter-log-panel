@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     )
 
     # Sync Configuration
-    SYNC_INTERVAL_SECONDS: int = 300
+    SYNC_INTERVAL_SECONDS: int = 15
     AUTO_SYNC_ENABLED: bool = True
     MAX_LOG_LINE_BATCH: int = 5000
 

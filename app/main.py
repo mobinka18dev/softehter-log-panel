@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
@@ -12,21 +13,25 @@ from app.database import init_db, get_db
 from app.engine.synchronizer import LogSynchronizer
 from app.api import auth, dashboard, sessions, export, users, sync, audit
 
+logger = logging.getLogger("uvicorn.error")
+
 
 async def periodic_log_sync():
-    """Background task to sync logs periodically if enabled."""
+    """Background task to sync logs periodically every 15 seconds."""
     while True:
         try:
             await asyncio.sleep(settings.SYNC_INTERVAL_SECONDS)
             if settings.AUTO_SYNC_ENABLED:
                 with get_db() as conn:
                     sync_engine = LogSynchronizer(conn)
-                    sync_engine.sync()
+                    stats = sync_engine.sync()
+                    if stats.get("events_imported", 0) > 0:
+                        logger.info(f"[AutoSync] Imported {stats['events_imported']} events from {stats['files_updated']} files.")
         except asyncio.CancelledError:
             break
-        except Exception:
-            # Continue running background sync even if an iteration encounters an issue
-            pass
+        except Exception as e:
+            logger.error(f"[AutoSync] Error during background log sync: {e}", exc_info=True)
+            await asyncio.sleep(5)
 
 
 @asynccontextmanager

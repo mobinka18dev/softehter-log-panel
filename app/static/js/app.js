@@ -8,7 +8,7 @@ const App = {
     theme: localStorage.getItem("panel_theme") || "dark",
     currentUser: null,
     activeTab: "dashboard",
-    token: localStorage.getItem("panel_token") || null,
+    token: sessionStorage.getItem("panel_token") || null,
     reportPage: 1,
     auditPage: 1,
     usernames: [],
@@ -33,6 +33,12 @@ const App = {
       incompleteSessions: "نشست‌های ناقص",
       totalDuration: "مجموع زمان اتصال",
       qualityRating: "دقت تطبیق نشست‌ها",
+      activeNowTitle: "🟢 اتصالات هم‌اکنون آنلاین (بر اساس لاگ)",
+      autoSyncHint: "🔄 بروزرسانی خودکار هر ۱۵ ثانیه",
+      clientPort: "پورت کلاینت",
+      protocol: "پروتکل / کلاینت",
+      currentDuration: "مدت اتصال تا الان",
+      noActiveSessions: "هیچ اتصال بازی در لاگ یافت نشد (کاربر آنلاینی ثبت نشده است)",
       topUsersTitle: "کاربران با بیشترین مدت زمان اتصال",
       recentEventsTitle: "رویدادهای اخیر سرور",
       activityChartTitle: "نمودار فعالیت روزانه اتصالات",
@@ -93,6 +99,12 @@ const App = {
       incompleteSessions: "Incomplete Sessions",
       totalDuration: "Total Connection Time",
       qualityRating: "Parser Accuracy",
+      activeNowTitle: "🟢 Currently Active Connections (In Log)",
+      autoSyncHint: "🔄 Auto-refresh every 15s",
+      clientPort: "Client Port",
+      protocol: "Protocol / Client",
+      currentDuration: "Elapsed Duration",
+      noActiveSessions: "No open sessions found in log",
       topUsersTitle: "Top Active VPN Users",
       recentEventsTitle: "Recent Server Events",
       activityChartTitle: "Daily Connection Activity",
@@ -154,6 +166,9 @@ const App = {
   },
 
   async init() {
+    // Clear any legacy persistent tokens from localStorage
+    localStorage.removeItem("panel_token");
+
     this.applyTheme(this.state.theme);
     this.applyLang(this.state.lang);
 
@@ -164,6 +179,7 @@ const App = {
     await this.checkAuth();
 
     this.bindEvents();
+    this.setupAutoRefresh();
   },
 
   applyTheme(theme) {
@@ -288,6 +304,39 @@ const App = {
     document.getElementById("setup-modal").style.display = "none";
   },
 
+  async logout() {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: this.getAuthHeaders(),
+        credentials: "same-origin"
+      });
+    } catch (e) {
+      console.warn("Logout error:", e);
+    }
+    sessionStorage.removeItem("panel_token");
+    localStorage.removeItem("panel_token");
+    this.state.token = null;
+    this.state.currentUser = null;
+    if (this._autoRefreshTimer) {
+      clearInterval(this._autoRefreshTimer);
+      this._autoRefreshTimer = null;
+    }
+    window.location.reload();
+  },
+
+  setupAutoRefresh() {
+    if (this._autoRefreshTimer) {
+      clearInterval(this._autoRefreshTimer);
+    }
+    // Automatically refresh dashboard every 15 seconds to reflect latest synced VPN connections
+    this._autoRefreshTimer = setInterval(() => {
+      if (this.state.activeTab === "dashboard" && this.state.currentUser) {
+        this.loadDashboard();
+      }
+    }, 15000);
+  },
+
   bindEvents() {
     // Navigation
     document.querySelectorAll(".nav-link").forEach(link => {
@@ -309,13 +358,10 @@ const App = {
     });
 
     // Logout
-    document.getElementById("btn-logout").addEventListener("click", async () => {
-      await fetch("/api/auth/logout", { credentials: "same-origin" });
-      localStorage.removeItem("panel_token");
-      this.state.token = null;
-      this.state.currentUser = null;
-      window.location.reload();
-    });
+    const btnLogout = document.getElementById("btn-logout");
+    if (btnLogout) {
+      btnLogout.addEventListener("click", () => this.logout());
+    }
 
     // Login Form Submit
     document.getElementById("login-form").addEventListener("submit", async (e) => {
@@ -334,11 +380,13 @@ const App = {
         const data = await res.json();
         if (res.ok) {
           this.state.token = data.access_token;
-          localStorage.setItem("panel_token", data.access_token);
+          sessionStorage.setItem("panel_token", data.access_token);
+          localStorage.removeItem("panel_token");
           this.state.currentUser = data.user;
           this.renderUserBadge();
           this.hideLoginModal();
           this.loadCurrentTab();
+          this.setupAutoRefresh();
         } else {
           errEl.innerText = data.detail || "خطا در احراز هویت";
           errEl.style.display = "block";
@@ -520,11 +568,12 @@ const App = {
   // -------------------------------------------------------------
   async loadDashboard() {
     try {
-      const [sumRes, topRes, recRes, qRes] = await Promise.all([
+      const [sumRes, topRes, recRes, qRes, actRes] = await Promise.all([
         fetch("/api/dashboard/summary", { headers: this.getAuthHeaders() }),
         fetch("/api/dashboard/top-users?limit=7", { headers: this.getAuthHeaders() }),
         fetch("/api/dashboard/recent-events?limit=8", { headers: this.getAuthHeaders() }),
-        fetch("/api/dashboard/quality-report", { headers: this.getAuthHeaders() })
+        fetch("/api/dashboard/quality-report", { headers: this.getAuthHeaders() }),
+        fetch("/api/dashboard/active-sessions", { headers: this.getAuthHeaders() })
       ]);
 
       if (sumRes.ok) {
@@ -551,10 +600,44 @@ const App = {
         this.renderRecentEvents(recEvents);
       }
 
+      if (actRes && actRes.ok) {
+        const actData = await actRes.json();
+        this.renderActiveSessions(actData);
+      }
+
       await this.loadDashboardActivity();
     } catch (e) {
       console.error("Dashboard error:", e);
     }
+  },
+
+  renderActiveSessions(data) {
+    const tbody = document.getElementById("active-sessions-tbody");
+    const countBadge = document.getElementById("badge-active-now-count");
+    const count = (data && data.total_active) || 0;
+    if (countBadge) {
+      countBadge.innerText = this.state.lang === 'fa' ? `${count} اتصال` : `${count} Active`;
+    }
+    if (!tbody) return;
+    const sessions = (data && data.sessions) || [];
+    if (sessions.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:16px;">${this.state.lang === 'fa' ? 'هیچ اتصال بازی در لاگ یافت نشد (کاربر آنلاینی ثبت نشده است)' : 'No open sessions found in log'}</td></tr>`;
+      return;
+    }
+    const esc = this.escapeHtml;
+    tbody.innerHTML = sessions.map(s => `
+      <tr>
+        <td><strong>${esc(s.username)}</strong></td>
+        <td><span class="badge badge-active">${esc(s.virtual_hub)}</span></td>
+        <td><code>${esc(s.client_ip)}</code></td>
+        <td>${esc(s.client_port)}</td>
+        <td>${this.state.lang === 'fa' ? esc(s.login_time_jalali) : esc(s.login_time)}</td>
+        <td>
+          <span style="color:var(--accent-emerald); font-weight:700;">🟢 ${esc(s.duration_formatted)}</span>
+        </td>
+        <td><small style="color:var(--text-dim); font-family:monospace;">${esc(s.session_id)}</small></td>
+      </tr>
+    `).join("");
   },
 
   renderTopUsers(users) {

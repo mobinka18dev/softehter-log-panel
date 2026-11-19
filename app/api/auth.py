@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from app.database import get_db
 from app.core.security import verify_password, hash_password, create_access_token
 from app.core.rate_limiter import is_rate_limited, record_failed_attempt, clear_rate_limit
-from app.api.deps import get_current_user, record_audit
+from app.api.deps import get_current_user, get_current_user_optional, record_audit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -132,14 +132,13 @@ def login(req: LoginRequest, request: Request, response: Response):
     }
     access_token = create_access_token(token_payload)
 
-    # Set secure cookie
+    # Set session cookie (no max_age so it expires when browser is closed)
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
         samesite="lax",
-        secure=False,  # Set to True if using HTTPS
-        max_age=8 * 3600
+        secure=False  # Set to True if using HTTPS
     )
 
     record_audit(
@@ -161,15 +160,16 @@ def login(req: LoginRequest, request: Request, response: Response):
     }
 
 
-@router.post("/logout")
-def logout(response: Response, current_user: dict = Depends(get_current_user)):
+@router.api_route("/logout", methods=["GET", "POST"])
+def logout(response: Response, current_user: dict | None = Depends(get_current_user_optional)):
     """Log out current user and clear auth cookie."""
     response.delete_cookie("access_token")
-    record_audit(
-        action="LOGOUT",
-        details=f"User '{current_user['username']}' logged out",
-        user=current_user
-    )
+    if current_user:
+        record_audit(
+            action="LOGOUT",
+            details=f"User '{current_user['username']}' logged out",
+            user=current_user
+        )
     return {"message": "Logged out successfully"}
 
 

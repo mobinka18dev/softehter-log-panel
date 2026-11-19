@@ -124,10 +124,10 @@ class SessionCorrelator:
                 username = username or "unknown"
 
                 cursor.execute("""
-                    SELECT id, login_time, logout_time, status, source_logs
+                    SELECT id, virtual_hub, login_time, logout_time, status, source_logs
                     FROM vpn_sessions
-                    WHERE virtual_hub = ? AND session_id = ?
-                """, (hub, sess_id))
+                    WHERE session_id = ?
+                """, (sess_id,))
                 existing = cursor.fetchone()
 
                 now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -152,9 +152,11 @@ class SessionCorrelator:
                     else:
                         status = SessionStatus.ACTIVE.value
 
+                    target_hub = hub if hub != 'DEFAULT' else existing["virtual_hub"]
                     cursor.execute("""
                         UPDATE vpn_sessions
                         SET username = COALESCE(?, username),
+                            virtual_hub = ?,
                             client_ip = COALESCE(?, client_ip),
                             client_port = COALESCE(?, client_port),
                             login_time = ?,
@@ -166,7 +168,7 @@ class SessionCorrelator:
                             updated_at = ?
                         WHERE id = ?
                     """, (
-                        username, client_ip, client_port, login_time,
+                        username, target_hub, client_ip, client_port, login_time,
                         duration, status, reason, conf, src_str, now_ts, existing["id"]
                     ))
                 else:
@@ -192,10 +194,10 @@ class SessionCorrelator:
                 in_bytes = ev.incoming_bytes
 
                 cursor.execute("""
-                    SELECT id, username, client_ip, client_port, login_time, logout_time, status, source_logs
+                    SELECT id, virtual_hub, username, client_ip, client_port, login_time, logout_time, status, source_logs
                     FROM vpn_sessions
-                    WHERE virtual_hub = ? AND session_id = ?
-                """, (hub, sess_id))
+                    WHERE session_id = ?
+                """, (sess_id,))
                 existing = cursor.fetchone()
 
                 now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -218,9 +220,11 @@ class SessionCorrelator:
                         reason = "Missing login event (session began before log window)"
                         conf = 0.5
 
+                    target_hub = hub if hub != 'DEFAULT' else existing["virtual_hub"]
                     cursor.execute("""
                         UPDATE vpn_sessions
-                        SET logout_time = ?,
+                        SET virtual_hub = ?,
+                            logout_time = ?,
                             duration_seconds = ?,
                             status = ?,
                             status_reason = ?,
@@ -231,7 +235,7 @@ class SessionCorrelator:
                             updated_at = ?
                         WHERE id = ?
                     """, (
-                        logout_time, duration, status, reason, out_bytes,
+                        target_hub, logout_time, duration, status, reason, out_bytes,
                         in_bytes, conf, src_str, now_ts, existing["id"]
                     ))
                 else:
@@ -259,16 +263,16 @@ class SessionCorrelator:
 
             # Handle CONN_CREATED with session_id (e.g. from VPN Client details)
             elif ev.event_type == EventType.CONN_CREATED and ev.session_id:
-                hub = ev.virtual_hub
                 sess_id = ev.session_id
                 now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 cursor.execute("""
                     UPDATE vpn_sessions
                     SET client_ip = COALESCE(?, client_ip),
                         client_port = COALESCE(?, client_port),
+                        virtual_hub = CASE WHEN (virtual_hub = 'DEFAULT' OR virtual_hub IS NULL) AND ? != 'DEFAULT' THEN ? ELSE virtual_hub END,
                         updated_at = ?
-                    WHERE virtual_hub = ? AND session_id = ?
-                """, (ev.client_ip, ev.client_port, now_ts, hub, sess_id))
+                    WHERE session_id = ?
+                """, (ev.client_ip, ev.client_port, ev.virtual_hub, ev.virtual_hub, now_ts, sess_id))
 
         # 3. Handle Server Restart Interruption
         if server_restarts:

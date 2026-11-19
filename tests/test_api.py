@@ -175,3 +175,53 @@ def test_add_user_and_strict_rbac(client, admin_headers):
     # d) Allowed on Sync
     assert client.get("/api/sync/status", headers=sub_admin_headers).status_code == 200
     assert client.get("/api/sync/diagnostics", headers=sub_admin_headers).status_code == 200
+
+
+def test_active_sessions_and_logout(client, admin_headers):
+    # Insert an ACTIVE session
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO vpn_sessions (
+                session_id, virtual_hub, username, client_ip, client_port,
+                login_time, status, confidence_score, created_at, updated_at
+            ) VALUES (
+                'SID-ACTIVE-99', 'HUB', 'raasano', '91.92.208.200', 50095,
+                '2026-11-19 12:00:00', 'ACTIVE', 1.0,
+                '2026-11-19 12:00:00', '2026-11-19 12:00:00'
+            )
+        """)
+
+    # Test GET /api/dashboard/active-sessions
+    res = client.get("/api/dashboard/active-sessions", headers=admin_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total_active"] == 1
+    assert data["sessions"][0]["session_id"] == "SID-ACTIVE-99"
+    assert data["sessions"][0]["username"] == "raasano"
+    assert data["sessions"][0]["virtual_hub"] == "HUB"
+    assert data["sessions"][0]["duration_seconds"] >= 0
+
+    # Test session cookie on login (must not have max-age or expires to be a session cookie)
+    login_res = client.post("/api/auth/login", json={
+        "username": "test_admin",
+        "password": "AdminPassword123!"
+    })
+    # If password was AdminPass123! from fixture:
+    login_res = client.post("/api/auth/login", json={
+        "username": "test_admin",
+        "password": "AdminPass123!"
+    })
+    assert login_res.status_code == 200
+    set_cookie_header = login_res.headers.get("set-cookie", "")
+    assert "access_token=" in set_cookie_header
+    assert "Max-Age=" not in set_cookie_header  # Verifies it's a true browser session cookie
+
+    # Test Logout via POST
+    logout_post = client.post("/api/auth/logout", headers=admin_headers)
+    assert logout_post.status_code == 200
+    assert logout_post.json()["message"] == "Logged out successfully"
+
+    # Test Logout via GET (resilience against wrong HTTP method)
+    logout_get = client.get("/api/auth/logout")
+    assert logout_get.status_code == 200
+    assert logout_get.json()["message"] == "Logged out successfully"
