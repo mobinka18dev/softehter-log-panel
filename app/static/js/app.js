@@ -239,10 +239,37 @@ const App = {
     // Role-based visibility
     const isSuper = user.role === "superadmin";
     const isAdmin = user.role === "admin" || isSuper;
+    const syncNav = document.getElementById("nav-item-sync");
+    if (syncNav) syncNav.style.display = isAdmin ? "block" : "none";
     const userNav = document.getElementById("nav-item-users");
     if (userNav) userNav.style.display = isAdmin ? "block" : "none";
     const auditNav = document.getElementById("nav-item-audit");
     if (auditNav) auditNav.style.display = isAdmin ? "block" : "none";
+
+    const btnAddUser = document.getElementById("btn-add-user-modal");
+    if (btnAddUser) btnAddUser.style.display = isSuper ? "inline-flex" : "none";
+  },
+
+  showAddUserModal() {
+    const isSuper = this.state.currentUser && this.state.currentUser.role === "superadmin";
+    if (!isSuper) {
+      alert("تنها مدیر ارشد (Superadmin) اجازه افزودن کاربر جدید را دارد.");
+      return;
+    }
+    const form = document.getElementById("add-user-form");
+    if (form) form.reset();
+    const err = document.getElementById("add-user-error");
+    if (err) {
+      err.style.display = "none";
+      err.innerText = "";
+    }
+    const modal = document.getElementById("add-user-modal");
+    if (modal) modal.style.display = "flex";
+  },
+
+  hideAddUserModal() {
+    const modal = document.getElementById("add-user-modal");
+    if (modal) modal.style.display = "none";
   },
 
   showLoginModal() {
@@ -352,6 +379,59 @@ const App = {
       }
     });
 
+    // Add User Form Submission
+    const addUserForm = document.getElementById("add-user-form");
+    if (addUserForm) {
+      addUserForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById("add-user-error");
+        errEl.style.display = "none";
+
+        const username = document.getElementById("add-user-username").value.trim();
+        const fullName = document.getElementById("add-user-fullname").value.trim();
+        const role = document.getElementById("add-user-role").value;
+        const password = document.getElementById("add-user-password").value;
+        const confirmPassword = document.getElementById("add-user-password-confirm").value;
+
+        if (password !== confirmPassword) {
+          errEl.innerText = "رمز عبور با تکرار آن مطابقت ندارد.";
+          errEl.style.display = "block";
+          return;
+        }
+
+        const submitBtn = document.getElementById("btn-submit-add-user");
+        if (submitBtn) submitBtn.disabled = true;
+
+        try {
+          const res = await fetch("/api/panel-users", {
+            method: "POST",
+            headers: this.getAuthHeaders(),
+            body: JSON.stringify({
+              username: username,
+              full_name: fullName,
+              role: role,
+              password: password
+            })
+          });
+
+          if (res.ok) {
+            alert("کاربر جدید با موفقیت ایجاد شد.");
+            this.hideAddUserModal();
+            this.loadUsers();
+          } else {
+            const data = await res.json();
+            errEl.innerText = data.detail || "خطا در ایجاد کاربر";
+            errEl.style.display = "block";
+          }
+        } catch (err) {
+          errEl.innerText = "ارتباط با سرور برقرار نشد.";
+          errEl.style.display = "block";
+        } finally {
+          if (submitBtn) submitBtn.disabled = false;
+        }
+      });
+    }
+
     // Quick Date Filters
     document.querySelectorAll(".btn-quick-date").forEach(btn => {
       btn.addEventListener("click", (e) => {
@@ -401,6 +481,13 @@ const App = {
   },
 
   switchTab(tab) {
+    const role = this.state.currentUser ? this.state.currentUser.role : null;
+    const isAdmin = role === "superadmin" || role === "admin";
+    if (["sync", "users", "audit"].includes(tab) && !isAdmin) {
+      alert("شما دسترسی لازم برای مشاهده این بخش را ندارید.");
+      return;
+    }
+
     this.state.activeTab = tab;
     document.querySelectorAll(".nav-link").forEach(l => l.classList.remove("active"));
     const activeNav = document.querySelector(`.nav-link[data-tab="${tab}"]`);
@@ -817,6 +904,10 @@ const App = {
       const tbody = document.getElementById("panel-users-tbody");
       if (!tbody) return;
 
+      const isSuper = this.state.currentUser && this.state.currentUser.role === "superadmin";
+      const btnAddUser = document.getElementById("btn-add-user-modal");
+      if (btnAddUser) btnAddUser.style.display = isSuper ? "inline-flex" : "none";
+
       const esc = this.escapeHtml;
       tbody.innerHTML = users.map(u => `
         <tr>
@@ -827,8 +918,10 @@ const App = {
           <td>${esc(u.created_at)}</td>
           <td>${esc(u.last_login_at) || "-"}</td>
           <td>
-            <button class="btn btn-secondary btn-sm" onclick="App.openResetPwd(${u.id}, '${esc(u.username)}')">رمز</button>
-            ${u.id !== App.state.currentUser.id ? `
+            ${(isSuper || u.id === App.state.currentUser.id) ? `
+              <button class="btn btn-secondary btn-sm" onclick="App.openResetPwd(${u.id}, '${esc(u.username)}')">رمز</button>
+            ` : ''}
+            ${(isSuper && u.id !== App.state.currentUser.id) ? `
               <button class="btn btn-danger btn-sm" onclick="App.deleteUser(${u.id}, '${esc(u.username)}')">حذف</button>
             ` : ''}
           </td>

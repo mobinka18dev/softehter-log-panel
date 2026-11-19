@@ -104,3 +104,74 @@ def test_dashboard_and_sessions(client, admin_headers):
     csv_res = client.get("/api/export/csv", headers=admin_headers)
     assert csv_res.status_code == 200
     assert "text/csv" in csv_res.headers["content-type"]
+
+
+def test_add_user_and_strict_rbac(client, admin_headers):
+    # 1. Superadmin creates a viewer user
+    create_viewer_res = client.post("/api/panel-users", headers=admin_headers, json={
+        "username": "viewer_user",
+        "password": "ViewerPassword123!",
+        "full_name": "Report Viewer",
+        "role": "viewer"
+    })
+    assert create_viewer_res.status_code == 200
+    assert create_viewer_res.json()["username"] == "viewer_user"
+
+    # 2. Superadmin creates an admin user
+    create_admin_res = client.post("/api/panel-users", headers=admin_headers, json={
+        "username": "sub_admin",
+        "password": "AdminPassword123!",
+        "full_name": "Sub Administrator",
+        "role": "admin"
+    })
+    assert create_admin_res.status_code == 200
+
+    # 3. Viewer login and token
+    v_login = client.post("/api/auth/login", json={
+        "username": "viewer_user",
+        "password": "ViewerPassword123!"
+    })
+    assert v_login.status_code == 200
+    viewer_token = v_login.json()["access_token"]
+    viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
+
+    # 4. Admin login and token
+    a_login = client.post("/api/auth/login", json={
+        "username": "sub_admin",
+        "password": "AdminPassword123!"
+    })
+    assert a_login.status_code == 200
+    sub_admin_token = a_login.json()["access_token"]
+    sub_admin_headers = {"Authorization": f"Bearer {sub_admin_token}"}
+
+    # --- RBAC Enforcement on Viewer ---
+    # a) Blocked from viewing Panel Users
+    assert client.get("/api/panel-users", headers=viewer_headers).status_code == 403
+    # b) Blocked from creating Panel Users
+    assert client.post("/api/panel-users", headers=viewer_headers, json={
+        "username": "hacker", "password": "Password123!", "role": "viewer"
+    }).status_code == 403
+    # c) Blocked from Audit Logs
+    assert client.get("/api/audit-logs", headers=viewer_headers).status_code == 403
+    # d) Blocked from Log Sync Status, Diagnostics, and Trigger
+    assert client.get("/api/sync/status", headers=viewer_headers).status_code == 403
+    assert client.get("/api/sync/diagnostics", headers=viewer_headers).status_code == 403
+    assert client.post("/api/sync/run", headers=viewer_headers).status_code == 403
+    # e) Allowed on Dashboard and Sessions
+    assert client.get("/api/dashboard/summary", headers=viewer_headers).status_code == 200
+    assert client.get("/api/sessions", headers=viewer_headers).status_code == 200
+
+    # --- RBAC Enforcement on Sub Admin ---
+    # a) Allowed to view Panel Users
+    list_users_res = client.get("/api/panel-users", headers=sub_admin_headers)
+    assert list_users_res.status_code == 200
+    assert len(list_users_res.json()) >= 3
+    # b) Blocked from creating Panel Users (Superadmin only)
+    assert client.post("/api/panel-users", headers=sub_admin_headers, json={
+        "username": "another_user", "password": "Password123!", "role": "viewer"
+    }).status_code == 403
+    # c) Allowed on Audit Logs
+    assert client.get("/api/audit-logs", headers=sub_admin_headers).status_code == 200
+    # d) Allowed on Sync
+    assert client.get("/api/sync/status", headers=sub_admin_headers).status_code == 200
+    assert client.get("/api/sync/diagnostics", headers=sub_admin_headers).status_code == 200

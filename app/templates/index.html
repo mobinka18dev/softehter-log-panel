@@ -42,7 +42,7 @@
             <span data-i18n="reports">گزارشات کاربران</span>
           </a>
         </li>
-        <li class="nav-item">
+        <li class="nav-item" id="nav-item-sync">
           <a class="nav-link" data-tab="sync">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="23 4 23 10 17 10"></polyline>
@@ -377,7 +377,7 @@
           <div class="card">
             <div class="card-header">
               <div class="card-title" data-i18n="users">مدیریت کاربران پنل مدیریت</div>
-              <button class="btn btn-primary btn-sm" onclick="App.showAddUserModal()" data-i18n="addUser">افزودن کاربر جدید</button>
+              <button class="btn btn-primary btn-sm" id="btn-add-user-modal" onclick="App.showAddUserModal()" data-i18n="addUser">افزودن کاربر جدید</button>
             </div>
             <div class="table-responsive">
               <table class="table">
@@ -464,6 +464,48 @@
         </div>
         <div id="setup-error" style="color:var(--accent-rose); font-size:12px; margin-bottom:14px; display:none;"></div>
         <button type="submit" class="btn btn-primary" style="width:100%;">ایجاد مدیر ارشد و شروع کار</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add User -->
+  <div class="modal-overlay" id="add-user-modal" style="display:none;">
+    <div class="modal-content" style="max-width:520px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h2 style="margin:0; font-size:1.15rem;" data-i18n="addUser">افزودن کاربر جدید</h2>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="App.hideAddUserModal()" style="padding:4px 8px; border-radius:6px;">✕</button>
+      </div>
+      <p style="color:var(--text-muted); font-size:12px; margin-bottom:18px;">تعریف کاربر جدید برای ورود به سامانه با نقش و سطح دسترسی مشخص.</p>
+      <form id="add-user-form">
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label" data-i18n="username">نام کاربری</label>
+          <input type="text" class="form-input" id="add-user-username" required minlength="3" maxlength="50" placeholder="مثال: report_viewer">
+        </div>
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label">نام و نام خانوادگی</label>
+          <input type="text" class="form-input" id="add-user-fullname" maxlength="100" placeholder="مثال: کارشناس مانیتورینگ">
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+          <label class="form-label">نقش و سطح دسترسی (Role & Permissions)</label>
+          <select class="form-input" id="add-user-role" required style="font-size:12px; height:auto; padding:8px;">
+            <option value="viewer">بیننده (Viewer) — فقط مشاهده داشبورد و گزارشات نشست‌ها (فاقد دسترسی به لاگ‌های اصلی، ممیزی و کاربران)</option>
+            <option value="admin">مدیر (Admin) — دسترسی به گزارشات، ابزار همگام‌سازی لاگ‌ها و مشاهده لیست کاربران</option>
+            <option value="superadmin">مدیر ارشد (Superadmin) — دسترسی کامل: ایجاد/حذف کاربران، ریست رمز و مشاهده لاگ‌های ممیزی</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label">رمز عبور (حداقل ۸ کاراکتر)</label>
+          <input type="password" class="form-input" id="add-user-password" required minlength="8" autocomplete="new-password">
+        </div>
+        <div class="form-group" style="margin-bottom:16px;">
+          <label class="form-label">تکرار رمز عبور</label>
+          <input type="password" class="form-input" id="add-user-password-confirm" required minlength="8" autocomplete="new-password">
+        </div>
+        <div id="add-user-error" style="color:var(--accent-rose); font-size:12px; margin-bottom:14px; display:none;"></div>
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+          <button type="button" class="btn btn-secondary" onclick="App.hideAddUserModal()" data-i18n="cancel">انصراف</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-add-user" data-i18n="save">ثبت و ایجاد کاربر</button>
+        </div>
       </form>
     </div>
   </div>

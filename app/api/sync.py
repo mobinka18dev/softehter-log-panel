@@ -49,7 +49,7 @@ def get_sync_status(current_user: dict = Depends(require_role(["superadmin", "ad
 
 
 @router.get("/diagnostics")
-def get_sync_diagnostics(current_user: dict = Depends(require_role(["superadmin", "admin", "viewer"]))):
+def get_sync_diagnostics(current_user: dict = Depends(require_role(["superadmin", "admin"]))):
     """Run diagnostics on SoftEther log paths and logging settings."""
     with get_db() as conn:
         sync_engine = LogSynchronizer(conn)
