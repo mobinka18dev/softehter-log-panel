@@ -46,6 +46,17 @@ echo -e "${BLUE}[3/5] Updating Python packages...${NC}"
 echo -e "${BLUE}[4/5] Updating database schema...${NC}"
 sudo -u "$APP_USER" PYTHONPATH="$INSTALL_DIR" "$INSTALL_DIR/.venv/bin/python" -c "import sys; sys.path.insert(0, '$INSTALL_DIR'); from app.database import init_db; init_db()"
 
+# Ensure permanent ACL cron is installed for daily rotated logs
+source "$INSTALL_DIR/.env"
+if [ -n "${SOFTETHER_LOG_DIR:-}" ]; then
+    CRON_FILE="/etc/cron.d/softether-panel-acl"
+    cat <<EOF > "$CRON_FILE"
+# Permanent ACL maintenance for SoftEther VPN daily rotated logs (mode 0600)
+* * * * * root find "${SOFTETHER_LOG_DIR}/server_log" "${SOFTETHER_LOG_DIR}/security_log" -maxdepth 2 -mmin -10 -exec setfacl -m u:${APP_USER}:rX {} + 2>/dev/null
+EOF
+    chmod 644 "$CRON_FILE"
+fi
+
 # 5. Restart service and verify health
 echo -e "${BLUE}[5/5] Restarting service...${NC}"
 systemctl restart "$SERVICE_NAME"

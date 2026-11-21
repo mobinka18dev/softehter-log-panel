@@ -42,6 +42,21 @@ def test_root_wrapper_scripts_exist():
         assert f"deploy/{script_name}" in content
 
 
+def test_install_and_update_scripts_contain_permanent_acl_cron():
+    root = Path(__file__).parent.parent
+    install_script = root / "deploy" / "install.sh"
+    assert install_script.exists()
+    install_content = install_script.read_text(encoding="utf-8")
+    assert "/etc/cron.d/softether-panel-acl" in install_content
+    assert "setfacl -m u:${APP_USER}:rX" in install_content or "setfacl" in install_content
+    assert "-mmin -10" in install_content
+
+    update_script = root / "deploy" / "update.sh"
+    assert update_script.exists()
+    update_content = update_script.read_text(encoding="utf-8")
+    assert "/etc/cron.d/softether-panel-acl" in update_content
+
+
 # =========================================================================
 # TASK 1 SPECIFIC TESTS
 # =========================================================================

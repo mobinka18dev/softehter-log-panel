@@ -203,6 +203,16 @@ fi
 
 echo -e "${GREEN}[+] Minimal read-only ACL configured safely. No write permissions or configuration files exposed.${NC}"
 
+# Configure permanent ACL cron for daily rotated 0600 logs
+CRON_FILE="/etc/cron.d/softether-panel-acl"
+echo -e "${GREEN}[+] Configuring permanent ACL maintenance cron in ${CRON_FILE}...${NC}"
+cat <<EOF > "$CRON_FILE"
+# Permanent ACL maintenance for SoftEther VPN daily rotated logs (mode 0600)
+# Automatically grants read-only ACL (rX) to '${APP_USER}' within 1 minute of daily log creation
+* * * * * root find "${SOFTETHER_LOG_DIR}/server_log" "${SOFTETHER_LOG_DIR}/security_log" -maxdepth 2 -mmin -10 -exec setfacl -m u:${APP_USER}:rX {} + 2>/dev/null
+EOF
+chmod 644 "$CRON_FILE"
+
 # Fix ownership and permissions before database initialization
 chown -R "$APP_USER":"$APP_GROUP" "$INSTALL_DIR"
 chown -R "$APP_USER":"$APP_GROUP" "$LOG_DIR"

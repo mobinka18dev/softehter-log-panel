@@ -33,6 +33,7 @@ systemctl stop "$SERVICE_NAME" 2>/dev/null || true
 systemctl disable "$SERVICE_NAME" 2>/dev/null || true
 rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
 rm -f "/etc/logrotate.d/softether-panel"
+rm -f "/etc/cron.d/softether-panel-acl"
 systemctl daemon-reload
 
 # 2. Backup or purge data
