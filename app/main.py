@@ -1,4 +1,5 @@
 import asyncio
+import time
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config import settings
 from app.database import init_db, get_db
 from app.engine.synchronizer import LogSynchronizer
+from app.engine.retention import cleanup_old_raw_events
 from app.api import auth, dashboard, sessions, export, users, sync, audit
 
 logger = logging.getLogger("uvicorn.error")
@@ -19,6 +21,8 @@ logger = logging.getLogger("uvicorn.error")
 async def periodic_log_sync():
     """Background task to sync logs periodically every 15 seconds."""
     logger.info(f"[AutoSync] Background log sync loop started (interval: {settings.SYNC_INTERVAL_SECONDS}s).")
+    last_retention_check: float = 0.0
+
     while True:
         try:
             await asyncio.sleep(settings.SYNC_INTERVAL_SECONDS)
@@ -39,6 +43,15 @@ async def periodic_log_sync():
                             f"{sync_stats.get('files_updated', 0)} files. Sessions updated: "
                             f"{corr_stats.get('sessions_updated', 0)} (Active now: {corr_stats.get('active_sessions', 0)})."
                         )
+
+            # Daily Auto-Retention Cleanup (runs once every 24 hours)
+            now_mono = time.monotonic()
+            if now_mono - last_retention_check >= 86400:
+                try:
+                    await asyncio.to_thread(cleanup_old_raw_events, settings.RAW_EVENTS_RETENTION_DAYS)
+                    last_retention_check = now_mono
+                except Exception as ret_err:
+                    logger.error(f"[Retention] Error during background raw events cleanup: {ret_err}", exc_info=True)
         except asyncio.CancelledError:
             logger.info("[AutoSync] Background log sync loop cancelled.")
             break

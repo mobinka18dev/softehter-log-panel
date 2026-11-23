@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     SYNC_INTERVAL_SECONDS: int = 15
     AUTO_SYNC_ENABLED: bool = True
     MAX_LOG_LINE_BATCH: int = 5000
+    RAW_EVENTS_RETENTION_DAYS: int = 60
 
     # Rate Limiting
     MAX_LOGIN_ATTEMPTS: int = 5
