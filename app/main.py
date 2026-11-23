@@ -18,31 +18,51 @@ from app.api import auth, dashboard, sessions, export, users, sync, audit
 logger = logging.getLogger("uvicorn.error")
 
 
+def _run_sync_cycle() -> tuple[dict, dict]:
+    """Execute a single sync and correlation cycle synchronously (to run in worker thread)."""
+    with get_db() as conn:
+        sync_engine = LogSynchronizer(conn)
+        sync_stats = sync_engine.sync_all()
+        corr_stats = sync_engine.correlate()
+        return sync_stats, corr_stats
+
+
 async def periodic_log_sync():
-    """Background task to sync logs periodically every 15 seconds."""
-    logger.info(f"[AutoSync] Background log sync loop started (interval: {settings.SYNC_INTERVAL_SECONDS}s).")
+    """Background task to sync logs periodically without blocking application startup."""
+    logger.info(f"[AutoSync] Background log sync task started (interval: {settings.SYNC_INTERVAL_SECONDS}s).")
     last_retention_check: float = 0.0
 
+    # 1. Immediate non-blocking initial sync in worker thread right after startup
+    if settings.AUTO_SYNC_ENABLED:
+        try:
+            sync_stats, corr_stats = await asyncio.to_thread(_run_sync_cycle)
+            if sync_stats.get("errors"):
+                logger.warning(f"[AutoSync] Errors/warnings during initial sync: {sync_stats['errors']}")
+            if sync_stats.get("events_imported", 0) > 0 or corr_stats.get("sessions_updated", 0) > 0:
+                logger.info(
+                    f"[AutoSync] Initial sync completed. Imported {sync_stats.get('events_imported', 0)} events from "
+                    f"{sync_stats.get('files_updated', 0)} files. Sessions updated: "
+                    f"{corr_stats.get('sessions_updated', 0)} (Active now: {corr_stats.get('active_sessions', 0)})."
+                )
+        except Exception as e:
+            logger.error(f"[AutoSync] Error during initial background log sync: {e}", exc_info=True)
+
+    # 2. Periodic sync loop
     while True:
         try:
             await asyncio.sleep(settings.SYNC_INTERVAL_SECONDS)
             if settings.AUTO_SYNC_ENABLED:
-                with get_db() as conn:
-                    sync_engine = LogSynchronizer(conn)
-                    # 1. Ingest new raw events from all log files
-                    sync_stats = sync_engine.sync_all()
-                    # 2. Correlate sessions
-                    corr_stats = sync_engine.correlate()
+                sync_stats, corr_stats = await asyncio.to_thread(_run_sync_cycle)
 
-                    if sync_stats.get("errors"):
-                        logger.warning(f"[AutoSync] Errors/warnings during sync: {sync_stats['errors']}")
+                if sync_stats.get("errors"):
+                    logger.warning(f"[AutoSync] Errors/warnings during sync: {sync_stats['errors']}")
 
-                    if sync_stats.get("events_imported", 0) > 0 or corr_stats.get("sessions_updated", 0) > 0:
-                        logger.info(
-                            f"[AutoSync] Imported {sync_stats.get('events_imported', 0)} events from "
-                            f"{sync_stats.get('files_updated', 0)} files. Sessions updated: "
-                            f"{corr_stats.get('sessions_updated', 0)} (Active now: {corr_stats.get('active_sessions', 0)})."
-                        )
+                if sync_stats.get("events_imported", 0) > 0 or corr_stats.get("sessions_updated", 0) > 0:
+                    logger.info(
+                        f"[AutoSync] Imported {sync_stats.get('events_imported', 0)} events from "
+                        f"{sync_stats.get('files_updated', 0)} files. Sessions updated: "
+                        f"{corr_stats.get('sessions_updated', 0)} (Active now: {corr_stats.get('active_sessions', 0)})."
+                    )
 
             # Daily Auto-Retention Cleanup (runs once every 24 hours)
             now_mono = time.monotonic()
@@ -62,25 +82,17 @@ async def periodic_log_sync():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize Database
+    # Startup: Initialize Database schema
     init_db()
 
-    # Initial sync on startup if log directory exists
-    try:
-        with get_db() as conn:
-            sync_engine = LogSynchronizer(conn)
-            sync_engine.sync()
-    except Exception:
-        pass
-
-    # Start background auto-sync task
+    # Start background auto-sync task immediately without blocking application startup
     sync_task = None
     if settings.AUTO_SYNC_ENABLED:
         sync_task = asyncio.create_task(periodic_log_sync())
 
     yield
 
-    # Shutdown
+    # Shutdown: Cleanly cancel background task
     if sync_task:
         sync_task.cancel()
         try:

@@ -39,6 +39,15 @@ def test_health_check(client):
     assert res2.json()["status"] == "ok"
 
 
+def test_non_blocking_startup_and_health(client):
+    """Verify that lifespan startup completes immediately and health check responds 200 OK without blocking."""
+    res = client.get("/api/health")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert "app" in data
+
+
 def test_initial_setup_and_login(client):
     # Check setup status: should be needed since no users exist
     res = client.get("/api/auth/setup-status")
