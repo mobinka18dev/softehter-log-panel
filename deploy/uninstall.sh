@@ -27,11 +27,15 @@ if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
     exit 0
 fi
 
-# 1. Stop and disable systemd service
-echo "[1/4] Stopping and disabling systemd service..."
+# 1. Stop and disable systemd service and ACL timer
+echo "[1/4] Stopping and disabling systemd service and ACL timer..."
 systemctl stop "$SERVICE_NAME" 2>/dev/null || true
 systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+systemctl stop softether-panel-acl.timer 2>/dev/null || true
+systemctl disable softether-panel-acl.timer 2>/dev/null || true
 rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+rm -f "/etc/systemd/system/softether-panel-acl.service"
+rm -f "/etc/systemd/system/softether-panel-acl.timer"
 rm -f "/etc/logrotate.d/softether-panel"
 rm -f "/etc/cron.d/softether-panel-acl"
 systemctl daemon-reload

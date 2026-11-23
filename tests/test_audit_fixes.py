@@ -42,19 +42,40 @@ def test_root_wrapper_scripts_exist():
         assert f"deploy/{script_name}" in content
 
 
-def test_install_and_update_scripts_contain_permanent_acl_cron():
+def test_install_and_update_scripts_contain_permanent_acl_timer():
     root = Path(__file__).parent.parent
     install_script = root / "deploy" / "install.sh"
     assert install_script.exists()
     install_content = install_script.read_text(encoding="utf-8")
-    assert "/etc/cron.d/softether-panel-acl" in install_content
-    assert "setfacl -m u:${APP_USER}:rX" in install_content or "setfacl" in install_content
-    assert "-mmin -10" in install_content
+    assert "softether-panel-acl.service" in install_content
+    assert "softether-panel-acl.timer" in install_content
+    assert "OnBootSec=30s" in install_content
+    assert "OnUnitActiveSec=1min" in install_content
+    assert "/usr/bin/find" in install_content
+    assert "/usr/bin/setfacl" in install_content
+    assert "-mmin -15" in install_content
+    assert "rm -f /etc/cron.d/softether-panel-acl" in install_content
+    assert "systemctl enable softether-panel-acl.timer" in install_content
 
     update_script = root / "deploy" / "update.sh"
     assert update_script.exists()
     update_content = update_script.read_text(encoding="utf-8")
-    assert "/etc/cron.d/softether-panel-acl" in update_content
+    assert "softether-panel-acl.service" in update_content
+    assert "softether-panel-acl.timer" in update_content
+    assert "OnBootSec=30s" in update_content
+    assert "OnUnitActiveSec=1min" in update_content
+    assert "/usr/bin/find" in update_content
+    assert "/usr/bin/setfacl" in update_content
+    assert "-mmin -15" in update_content
+    assert "rm -f /etc/cron.d/softether-panel-acl" in update_content
+    assert "systemctl enable softether-panel-acl.timer" in update_content
+
+    uninstall_script = root / "deploy" / "uninstall.sh"
+    assert uninstall_script.exists()
+    uninstall_content = uninstall_script.read_text(encoding="utf-8")
+    assert "softether-panel-acl.service" in uninstall_content
+    assert "softether-panel-acl.timer" in uninstall_content
+    assert "rm -f \"/etc/cron.d/softether-panel-acl\"" in uninstall_content or "rm -f /etc/cron.d/softether-panel-acl" in uninstall_content
 
 
 # =========================================================================

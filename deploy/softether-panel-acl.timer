@@ -1,0 +1,10 @@
+[Unit]
+Description=SoftEther VPN Log Panel - Run ACL Maintenance Every 1 Minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=1min
+Unit=softether-panel-acl.service
+
+[Install]
+WantedBy=timers.target

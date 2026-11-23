@@ -1,0 +1,7 @@
+[Unit]
+Description=SoftEther VPN Log Panel - Permanent ACL Maintenance
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/find "/root/vpnserver/server_log" "/root/vpnserver/security_log" -maxdepth 2 -mmin -15 -exec /usr/bin/setfacl -m u:softether-panel:rX {} +

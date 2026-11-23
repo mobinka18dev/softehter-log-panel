@@ -203,15 +203,33 @@ fi
 
 echo -e "${GREEN}[+] Minimal read-only ACL configured safely. No write permissions or configuration files exposed.${NC}"
 
-# Configure permanent ACL cron for daily rotated 0600 logs
-CRON_FILE="/etc/cron.d/softether-panel-acl"
-echo -e "${GREEN}[+] Configuring permanent ACL maintenance cron in ${CRON_FILE}...${NC}"
-cat <<EOF > "$CRON_FILE"
-# Permanent ACL maintenance for SoftEther VPN daily rotated logs (mode 0600)
-# Automatically grants read-only ACL (rX) to '${APP_USER}' within 1 minute of daily log creation
-* * * * * root find "${SOFTETHER_LOG_DIR}/server_log" "${SOFTETHER_LOG_DIR}/security_log" -maxdepth 2 -mmin -10 -exec setfacl -m u:${APP_USER}:rX {} + 2>/dev/null
+# Remove legacy cron job if present
+rm -f /etc/cron.d/softether-panel-acl
+
+# Configure permanent ACL systemd oneshot service & timer for daily rotated 0600 logs
+echo -e "${GREEN}[+] Configuring permanent ACL maintenance systemd service and timer...${NC}"
+cat <<EOF > /etc/systemd/system/softether-panel-acl.service
+[Unit]
+Description=SoftEther VPN Log Panel - Permanent ACL Maintenance
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/find "${SOFTETHER_LOG_DIR}/server_log" "${SOFTETHER_LOG_DIR}/security_log" -maxdepth 2 -mmin -15 -exec /usr/bin/setfacl -m u:${APP_USER}:rX {} +
 EOF
-chmod 644 "$CRON_FILE"
+
+cat <<EOF > /etc/systemd/system/softether-panel-acl.timer
+[Unit]
+Description=SoftEther VPN Log Panel - Run ACL Maintenance Every 1 Minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=1min
+Unit=softether-panel-acl.service
+
+[Install]
+WantedBy=timers.target
+EOF
 
 # Fix ownership and permissions before database initialization
 chown -R "$APP_USER":"$APP_GROUP" "$INSTALL_DIR"
@@ -226,14 +244,17 @@ fi
 echo -e "\n${BLUE}[7/8] Initializing database...${NC}"
 (cd "$INSTALL_DIR" && sudo -u "$APP_USER" PYTHONPATH="$INSTALL_DIR" "$INSTALL_DIR/.venv/bin/python" -c "import sys; sys.path.insert(0, '$INSTALL_DIR'); from app.database import init_db; init_db()")
 
-# 10. Install systemd service & logrotate
-echo -e "\n${BLUE}[8/8] Installing and starting systemd service...${NC}"
+# 10. Install systemd service, timer & logrotate
+echo -e "\n${BLUE}[8/8] Installing and starting systemd service and timer...${NC}"
 cp "$INSTALL_DIR/deploy/softether-panel.service" /etc/systemd/system/
 cp "$INSTALL_DIR/deploy/logrotate.conf" /etc/logrotate.d/softether-panel
 
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
+
+systemctl enable softether-panel-acl.timer
+systemctl restart softether-panel-acl.timer
 
 # Wait for startup and check health
 sleep 3

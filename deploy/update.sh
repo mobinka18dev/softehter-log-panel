@@ -46,15 +46,39 @@ echo -e "${BLUE}[3/5] Updating Python packages...${NC}"
 echo -e "${BLUE}[4/5] Updating database schema...${NC}"
 sudo -u "$APP_USER" PYTHONPATH="$INSTALL_DIR" "$INSTALL_DIR/.venv/bin/python" -c "import sys; sys.path.insert(0, '$INSTALL_DIR'); from app.database import init_db; init_db()"
 
-# Ensure permanent ACL cron is installed for daily rotated logs
+# Remove legacy cron job if present
+rm -f /etc/cron.d/softether-panel-acl
+
+# Ensure permanent ACL systemd service and timer are installed for daily rotated logs
 source "$INSTALL_DIR/.env"
 if [ -n "${SOFTETHER_LOG_DIR:-}" ]; then
-    CRON_FILE="/etc/cron.d/softether-panel-acl"
-    cat <<EOF > "$CRON_FILE"
-# Permanent ACL maintenance for SoftEther VPN daily rotated logs (mode 0600)
-* * * * * root find "${SOFTETHER_LOG_DIR}/server_log" "${SOFTETHER_LOG_DIR}/security_log" -maxdepth 2 -mmin -10 -exec setfacl -m u:${APP_USER}:rX {} + 2>/dev/null
+    echo -e "${BLUE}[*] Configuring permanent ACL maintenance systemd service and timer...${NC}"
+    cat <<EOF > /etc/systemd/system/softether-panel-acl.service
+[Unit]
+Description=SoftEther VPN Log Panel - Permanent ACL Maintenance
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/find "${SOFTETHER_LOG_DIR}/server_log" "${SOFTETHER_LOG_DIR}/security_log" -maxdepth 2 -mmin -15 -exec /usr/bin/setfacl -m u:${APP_USER}:rX {} +
 EOF
-    chmod 644 "$CRON_FILE"
+
+    cat <<EOF > /etc/systemd/system/softether-panel-acl.timer
+[Unit]
+Description=SoftEther VPN Log Panel - Run ACL Maintenance Every 1 Minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=1min
+Unit=softether-panel-acl.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable softether-panel-acl.timer
+    systemctl restart softether-panel-acl.timer
 fi
 
 # 5. Restart service and verify health

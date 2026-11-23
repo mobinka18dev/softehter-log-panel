@@ -208,11 +208,11 @@ class SessionCorrelator:
                 out_bytes = ev.outgoing_bytes
                 in_bytes = ev.incoming_bytes
 
-                # Match the open ACTIVE session first
+                # Match the open ACTIVE session first (or previously marked UNVERIFIED)
                 cursor.execute("""
                     SELECT id, virtual_hub, username, client_ip, client_port, login_time, logout_time, status, source_logs
                     FROM vpn_sessions
-                    WHERE session_id = ? AND status = 'ACTIVE'
+                    WHERE session_id = ? AND status IN ('ACTIVE', 'UNVERIFIED')
                     ORDER BY id DESC LIMIT 1
                 """, (sess_id,))
                 existing = cursor.fetchone()
@@ -413,8 +413,8 @@ class SessionCorrelator:
         now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         updated_count = 0
 
-        # 1. Close any ACTIVE sessions if a termination event exists
-        cursor.execute("SELECT id, session_id, login_time, outgoing_bytes, incoming_bytes FROM vpn_sessions WHERE status = 'ACTIVE'")
+        # 1. Close any ACTIVE or UNVERIFIED sessions if a termination event exists
+        cursor.execute("SELECT id, session_id, login_time, outgoing_bytes, incoming_bytes FROM vpn_sessions WHERE status IN ('ACTIVE', 'UNVERIFIED')")
         active_sessions = cursor.fetchall()
         for sess in active_sessions:
             sess_id = sess["session_id"]
@@ -475,11 +475,14 @@ class SessionCorrelator:
                 ))
                 updated_count += 1
 
-        # 3. Check for stale sessions (> 7 days) without termination
+        # 3. Check for stale sessions (> 7 days) without termination compared to latest log stream event
+        cursor.execute("SELECT MAX(timestamp) as latest_ts FROM vpn_raw_events")
+        max_row = cursor.fetchone()
+        ref_ts = max_row["latest_ts"] if (max_row and max_row["latest_ts"]) else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         cursor.execute("SELECT id, login_time FROM vpn_sessions WHERE status = 'ACTIVE' AND login_time IS NOT NULL")
         for r in cursor.fetchall():
-            now_local_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            delta = self._calc_duration(r["login_time"], now_local_str)
+            delta = self._calc_duration(r["login_time"], ref_ts)
             if delta > (7 * 86400):
                 cursor.execute("""
                     UPDATE vpn_sessions
